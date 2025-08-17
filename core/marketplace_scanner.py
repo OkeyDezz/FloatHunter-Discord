@@ -232,8 +232,26 @@ class MarketplaceScanner:
                     await on_init(data)
                     return
                 
+                # Log especial para o evento connect
+                if event_name == 'connect':
+                    logger.info(f"🔌 EVENTO CONNECT CAPTURADO: {event_name}")
+                    logger.info(f"📡 Dados do connect: {data}")
+                    return
+                
+                # Log especial para o evento disconnect
+                if event_name == 'disconnect':
+                    logger.info(f"🔌 EVENTO DISCONNECT CAPTURADO: {event_name}")
+                    logger.info(f"📡 Dados do disconnect: {data}")
+                    return
+                
+                # Log especial para o evento connect_error
+                if event_name == 'connect_error':
+                    logger.error(f"❌ EVENTO CONNECT_ERROR CAPTURADO: {event_name}")
+                    logger.error(f"📡 Dados do connect_error: {data}")
+                    return
+                
                 # Ignora eventos que já temos handlers específicos
-                if event_name in ['identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'auction_end', 'timesync', 'trade_status', 'error', 'connect_error', 'disconnect']:
+                if event_name in ['identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'auction_end', 'timesync', 'trade_status', 'error']:
                     return
                 
                 # Verifica se é uma lista ou dicionário
@@ -590,13 +608,33 @@ class MarketplaceScanner:
                 self.reconnect_attempts += 1
                 return False
             
-            # Aguarda um pouco para o evento init chegar e ser processado
-            logger.info("⏳ Aguardando processamento do evento init...")
-            await asyncio.sleep(5)
+            # Aguarda eventos e tenta autenticação
+            logger.info("⏳ Aguardando eventos e tentando autenticação...")
+            
+            # Loop de aguardar eventos ou autenticação
+            for i in range(30):  # 30 segundos timeout total
+                if self.authenticated:
+                    logger.info("✅ Autenticação confirmada!")
+                    break
+                
+                if i % 5 == 0:  # Log a cada 5 segundos
+                    logger.info(f"⏳ Aguardando autenticação... ({i}s)")
+                    logger.info(f"📊 Status: sio.connected={self.sio.connected}, authenticated={self.authenticated}")
+                
+                # Se chegou a 10 segundos e ainda não autenticou, tenta autenticação manual
+                if i == 10 and not self.authenticated:
+                    logger.info("🔄 Tentando autenticação manual após 10s...")
+                    if await self._authenticate_websocket():
+                        logger.info("✅ Autenticação manual bem-sucedida!")
+                        break
+                    else:
+                        logger.warning("⚠️ Autenticação manual falhou, continuando aguardando...")
+                
+                await asyncio.sleep(1)
             
             # Verifica se foi autenticado
             if not self.authenticated:
-                logger.error("❌ Falha na autenticação após evento init")
+                logger.error("❌ Falha na autenticação após 30s")
                 self.reconnect_attempts += 1
                 return False
             

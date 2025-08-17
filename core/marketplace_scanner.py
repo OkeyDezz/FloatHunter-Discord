@@ -171,37 +171,114 @@ class MarketplaceScanner:
         @self.sio.on('new_item', namespace='/trade')
         async def on_new_item(data):
             """Novo item disponível."""
-            logger.info(f"🆕 NOVO ITEM RECEBIDO: {data.get('market_name', 'Unknown')}")
-            logger.info(f"📊 Dados completos: {data}")
-            self._update_last_data_received()
-            await self._process_item(data, 'new_item')
+            try:
+                # Trata tanto lista quanto dicionário
+                if isinstance(data, list):
+                    logger.info(f"🆕 NOVO ITEM RECEBIDO (lista): {len(data)} itens")
+                    logger.info(f"📊 Dados completos: {data}")
+                    # Processa cada item da lista
+                    for item in data:
+                        if isinstance(item, dict):
+                            await self._process_item(item, 'new_item')
+                        else:
+                            logger.warning(f"⚠️ Item não é dicionário: {type(item)} - {item}")
+                elif isinstance(data, dict):
+                    logger.info(f"🆕 NOVO ITEM RECEBIDO: {data.get('market_name', 'Unknown')}")
+                    logger.info(f"📊 Dados completos: {data}")
+                    await self._process_item(data, 'new_item')
+                else:
+                    logger.warning(f"⚠️ Dados inesperados para new_item: {type(data)} - {data}")
+                
+                self._update_last_data_received()
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar new_item: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
         @self.sio.on('updated_item', namespace='/trade')
         async def on_updated_item(data):
             """Item atualizado."""
-            logger.info(f"🔄 ITEM ATUALIZADO: {data.get('market_name', 'Unknown')}")
-            logger.info(f"📊 Dados completos: {data}")
-            self._update_last_data_received()
-            await self._process_item(data, 'updated_item')
+            try:
+                # Trata tanto lista quanto dicionário
+                if isinstance(data, list):
+                    logger.info(f"🔄 ITEM ATUALIZADO (lista): {len(data)} itens")
+                    logger.info(f"📊 Dados completos: {data}")
+                    # Processa cada item da lista
+                    for item in data:
+                        if isinstance(item, dict):
+                            await self._process_item(item, 'updated_item')
+                        else:
+                            logger.warning(f"⚠️ Item não é dicionário: {type(item)} - {item}")
+                elif isinstance(data, dict):
+                    logger.info(f"🔄 ITEM ATUALIZADO: {data.get('market_name', 'Unknown')}")
+                    logger.info(f"📊 Dados completos: {data}")
+                    await self._process_item(data, 'updated_item')
+                else:
+                    logger.warning(f"⚠️ Dados inesperados para updated_item: {type(data)} - {data}")
+                
+                self._update_last_data_received()
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar updated_item: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
         @self.sio.on('deleted_item', namespace='/trade')
         async def on_deleted_item(data):
             """Item removido."""
-            logger.debug(f"🗑️ Item removido: {data}")
-            self._update_last_data_received()
+            try:
+                if isinstance(data, list):
+                    logger.info(f"🗑️ ITEM REMOVIDO (lista): {len(data)} itens")
+                    logger.info(f"📊 Dados completos: {data}")
+                elif isinstance(data, dict):
+                    logger.info(f"🗑️ ITEM REMOVIDO: {data.get('market_name', 'Unknown')}")
+                    logger.info(f"📊 Dados completos: {data}")
+                else:
+                    logger.info(f"🗑️ ITEM REMOVIDO: {type(data)} - {data}")
+                
+                self._update_last_data_received()
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar deleted_item: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
         @self.sio.on('auction_update', namespace='/trade')
         async def on_auction_update(data):
             """Atualização de leilão."""
-            logger.debug(f"🏷️ Atualização de leilão: {data}")
-            self._update_last_data_received()
+            try:
+                if isinstance(data, list):
+                    logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO (lista): {len(data)} itens")
+                    logger.info(f"📊 Dados completos: {data}")
+                elif isinstance(data, dict):
+                    logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO: {data.get('market_name', 'Unknown')}")
+                    logger.info(f"📊 Dados completos: {data}")
+                else:
+                    logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO: {type(data)} - {data}")
+                
+                self._update_last_data_received()
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar auction_update: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
         @self.sio.on('auction_end', namespace='/trade')
         async def on_auction_end(data):
             """Fim de leilão."""
-            logger.info(f"🏁 Leilão finalizado: {data}")
-            self._update_last_data_received()
-            # Não processa fim de leilão como oportunidade
+            try:
+                if isinstance(data, list):
+                    logger.info(f"🏁 LEILÃO FINALIZADO (lista): {len(data)} itens")
+                    logger.info(f"📊 Dados completos: {data}")
+                elif isinstance(data, dict):
+                    logger.info(f"🏁 LEILÃO FINALIZADO: {data.get('market_name', 'Unknown')}")
+                    logger.info(f"📊 Dados completos: {data}")
+                else:
+                    logger.info(f"🏁 LEILÃO FINALIZADO: {type(data)} - {data}")
+                
+                self._update_last_data_received()
+                # Não processa fim de leilão como oportunidade
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar auction_end: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
         @self.sio.on('timesync', namespace='/trade')
         async def on_timesync(data):

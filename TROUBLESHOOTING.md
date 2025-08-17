@@ -26,7 +26,7 @@ SUPABASE_ANON_KEY=sua_chave_anonima_aqui
 # OPCIONAIS (mas recomendadas)
 SUPABASE_SERVICE_ROLE_KEY=sua_chave_service_role_aqui
 MIN_PROFIT_PERCENTAGE=5.0
-MIN_LIQUIDITY_SCORE=0.7
+MIN_LIQUIDITY_SCORE=70.0
 MIN_PRICE=1.0
 MAX_PRICE=1000.0
 COIN_TO_USD_FACTOR=0.614
@@ -53,7 +53,7 @@ price_buff163 DECIMAL(10,2)  -- Preço em dólar
 ```sql
 -- Estrutura existente (NÃO ALTERAR)
 item_key TEXT PRIMARY KEY,
-liquidity_score DECIMAL(3,2)  -- Score de 0.0 a 1.0
+liquidity_score DECIMAL(5,2)  -- Score de 0.00 a 100.00
 ```
 
 #### 3. Verificar Logs do Railway
@@ -167,7 +167,7 @@ python3 main.py
 - **Cálculo**: `((preço_buff163 - preço_csgoempire_usd) / preço_csgoempire_usd) * 100`
 
 ### 2. Cálculo de Liquidez (Direto)
-- **Usa diretamente**: `liquidity_score` da tabela `liquidity`
+- **Usa diretamente**: `liquidity_score` da tabela `liquidity` (0 a 100)
 - **Sem cálculos complexos**: Apenas compara com o mínimo configurado
 
 ### 3. Busca de Dados
@@ -181,6 +181,6 @@ Item detectado no CSGOEmpire: 1000 coin
 Conversão para USD: 1000 * 0.614 = $614.00
 Preço Buff163: $650.00
 Lucro calculado: ((650 - 614) / 614) * 100 = 5.86%
-Score liquidez: 0.8 (da tabela)
-Resultado: Passa nos filtros se MIN_PROFIT_PERCENTAGE < 5.86% e MIN_LIQUIDITY_SCORE < 0.8
+Score liquidez: 85 (da tabela)
+Resultado: Passa nos filtros se MIN_PROFIT_PERCENTAGE < 5.86% e MIN_LIQUIDITY_SCORE < 85
 ```

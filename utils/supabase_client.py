@@ -75,7 +75,7 @@ class SupabaseClient:
             market_hash_name: Market hash name do item (usado como item_key)
             
         Returns:
-            float: Score de liquidez (0.0 a 1.0) ou None se não encontrado
+            float: Score de liquidez (0.0 a 100.0) ou None se não encontrado
         """
         try:
             if not self.client:

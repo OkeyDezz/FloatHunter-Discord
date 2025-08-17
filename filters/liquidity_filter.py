@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class LiquidityFilter:
     """Filtro para verificar se um item tem boa liquidez."""
     
-    def __init__(self, min_liquidity_score: float = 0.7):
+    def __init__(self, min_liquidity_score: float = 70.0):
         self.min_liquidity_score = min_liquidity_score
         self.supabase = SupabaseClient()
     
@@ -37,7 +37,7 @@ class LiquidityFilter:
             # Verifica se atende ao score mínimo
             result = liquidity_score >= self.min_liquidity_score
             
-            logger.debug(f"Liquidez: {liquidity_score:.3f} >= {self.min_liquidity_score} = {result} para {item.get('name')}")
+            logger.debug(f"Liquidez: {liquidity_score:.1f} >= {self.min_liquidity_score} = {result} para {item.get('name')}")
             
             return result
             
@@ -51,5 +51,5 @@ class LiquidityFilter:
     
     def set_min_liquidity_score(self, score: float):
         """Define o score mínimo de liquidez."""
-        self.min_liquidity_score = max(0.0, min(1.0, score))
+        self.min_liquidity_score = max(0.0, min(100.0, score))
         logger.info(f"Score mínimo de liquidez atualizado para {self.min_liquidity_score}")

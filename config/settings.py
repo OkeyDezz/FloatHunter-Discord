@@ -26,7 +26,7 @@ class Settings:
     
     # Configurações de filtros
     MIN_PROFIT_PERCENTAGE: float = float(os.getenv('MIN_PROFIT_PERCENTAGE', '5.0'))
-    MIN_LIQUIDITY_SCORE: float = float(os.getenv('MIN_LIQUIDITY_SCORE', '0.7'))
+    MIN_LIQUIDITY_SCORE: float = float(os.getenv('MIN_LIQUIDITY_SCORE', '70.0'))
     MIN_PRICE: float = float(os.getenv('MIN_PRICE', '1.0'))
     MAX_PRICE: float = float(os.getenv('MAX_PRICE', '1000.0'))
     

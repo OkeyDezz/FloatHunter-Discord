@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "python3 start_health.py"
+startCommand = "python3 start_full_bot.py"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"
@@ -12,7 +12,7 @@ restartPolicyMaxRetries = 10
 [deploy.env]
 PYTHONUNBUFFERED = "1"
 PYTHONDONTWRITEBYTECODE = "1"
-PORT = "8000"
+PORT = "8080"
 
 # Configurações específicas do Railway
 [deploy.healthcheck]

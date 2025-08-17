@@ -482,28 +482,8 @@ class MarketplaceScanner:
                 logger.error("❌ WebSocket desconectado após conexão")
                 return False
             
-            logger.info("⏳ Aguardando evento init...")
-            
-            # Aguarda evento 'init' e autenticação completa
-            logger.info("⏳ Aguardando evento init e autenticação...")
-            for i in range(60):  # 60 segundos timeout
-                if self.authenticated:
-                    logger.info("✅ WebSocket autenticado com sucesso via identify")
-                    break
-                if i % 10 == 0:  # Log a cada 10 segundos
-                    logger.info(f"⏳ Aguardando autenticação... ({i}s)")
-                await asyncio.sleep(1)
-            
-            if self.authenticated:
-                logger.info("✅ WebSocket autenticado com sucesso")
-                return True
-            else:
-                logger.error("❌ Timeout aguardando autenticação após identify")
-                logger.error("📊 Status atual:")
-                logger.error(f"  - sio.connected: {self.sio.connected}")
-                logger.error(f"  - authenticated: {self.authenticated}")
-                logger.error(f"  - is_connected: {self.is_connected}")
-                return False
+            logger.info("✅ WebSocket conectado com sucesso")
+            return True
                 
         except Exception as e:
             logger.error(f"❌ Erro ao conectar WebSocket: {e}")
@@ -548,7 +528,7 @@ class MarketplaceScanner:
             
             logger.info("⏳ Identify enviado, aguardando autenticação...")
             
-            # Aguarda autenticação
+            # Aguarda autenticação conforme documentação
             for i in range(30):  # 30 segundos timeout para autenticação
                 if self.authenticated:
                     logger.info("✅ Autenticação confirmada!")
@@ -605,6 +585,7 @@ class MarketplaceScanner:
                 return False
             
             # Aguarda um pouco para o evento init chegar
+            logger.info("⏳ Aguardando evento init...")
             await asyncio.sleep(3)
             
             # Se não foi autenticado pelo evento init, tenta autenticação manual

@@ -209,7 +209,7 @@ class MarketplaceScanner:
             logger.error(f"Erro ao extrair dados do item: {e}")
             return None
     
-    def _check_filters(self, item: Dict) -> bool:
+    async def _check_filters(self, item: Dict) -> bool:
         """Verifica se o item passa pelos filtros."""
         try:
             # Filtro de preço
@@ -219,11 +219,11 @@ class MarketplaceScanner:
                     return False
             
             # Filtro de lucro
-            if not self.profit_filter.check(item):
+            if not await self.profit_filter.check(item):
                 return False
             
             # Filtro de liquidez
-            if not self.liquidity_filter.check(item):
+            if not await self.liquidity_filter.check(item):
                 return False
             
             return True

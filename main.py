@@ -12,6 +12,7 @@ from typing import Dict
 from config.settings import Settings
 from core.marketplace_scanner import MarketplaceScanner
 from core.discord_poster import DiscordPoster
+from health_server import HealthServer
 
 # Configuração de logging
 logging.basicConfig(
@@ -98,6 +99,10 @@ class OpportunityBot:
             # Inicia scanner em background
             scanner_task = asyncio.create_task(self.scanner.run_forever())
             
+            # Inicia servidor de health check em background
+            health_server = HealthServer()
+            health_task = asyncio.create_task(health_server.start())
+            
             # Loop principal
             while self.running:
                 try:
@@ -121,6 +126,13 @@ class OpportunityBot:
             scanner_task.cancel()
             try:
                 await scanner_task
+            except asyncio.CancelledError:
+                pass
+            
+            # Cancela servidor de health check
+            health_task.cancel()
+            try:
+                await health_task
             except asyncio.CancelledError:
                 pass
             

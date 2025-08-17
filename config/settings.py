@@ -19,6 +19,11 @@ class Settings:
     DISCORD_TOKEN: Optional[str] = os.getenv('DISCORD_TOKEN')
     CSGOEMPIRE_CHANNEL_ID: Optional[int] = int(os.getenv('CSGOEMPIRE_CHANNEL_ID', '0'))
     
+    # Configurações do Supabase (Database)
+    SUPABASE_URL: Optional[str] = os.getenv('SUPABASE_URL')
+    SUPABASE_KEY: Optional[str] = os.getenv('SUPABASE_ANON_KEY')
+    SUPABASE_SERVICE_KEY: Optional[str] = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+    
     # Configurações de filtros
     MIN_PROFIT_PERCENTAGE: float = float(os.getenv('MIN_PROFIT_PERCENTAGE', '5.0'))
     MIN_LIQUIDITY_SCORE: float = float(os.getenv('MIN_LIQUIDITY_SCORE', '0.7'))
@@ -40,6 +45,8 @@ class Settings:
             ('CSGOEMPIRE_API_KEY', cls.CSGOEMPIRE_API_KEY),
             ('DISCORD_TOKEN', cls.DISCORD_TOKEN),
             ('CSGOEMPIRE_CHANNEL_ID', cls.CSGOEMPIRE_CHANNEL_ID),
+            ('SUPABASE_URL', cls.SUPABASE_URL),
+            ('SUPABASE_KEY', cls.SUPABASE_KEY),
         ]
         
         missing_configs = []

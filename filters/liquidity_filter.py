@@ -43,7 +43,7 @@ class LiquidityFilter:
     
     async def calculate_liquidity_score(self, item: Dict) -> Optional[float]:
         """
-        Calcula o score de liquidez do item baseado em dados históricos.
+        Calcula o score de liquidez do item baseado em dados das tabelas liquidity e market_data.
         
         Args:
             item: Dicionário com dados do item
@@ -68,32 +68,34 @@ class LiquidityFilter:
             # Calcula score baseado em múltiplos fatores
             score = 0.0
             
-            # Score baseado no liquidity_score da database
+            # Score baseado no liquidity_score da tabela liquidity
             if 'liquidity_score' in liquidity_data:
                 db_score = liquidity_data['liquidity_score']
                 if db_score is not None:
                     score += db_score * 0.6  # 60% do peso
             
-            # Score baseado no volume 24h
-            if 'volume_24h' in liquidity_data:
-                volume = liquidity_data['volume_24h']
-                if volume is not None and volume > 0:
-                    # Normaliza volume (assumindo que >100 é bom)
-                    volume_score = min(1.0, volume / 100.0)
-                    score += volume_score * 0.3  # 30% do peso
+            # Score baseado na quantidade disponível no WhiteMarket
+            if 'qty_whitemarket' in liquidity_data:
+                qty_whitemarket = liquidity_data['qty_whitemarket']
+                if qty_whitemarket is not None and qty_whitemarket > 0:
+                    # Normaliza quantidade (assumindo que >5 é bom)
+                    qty_score = min(1.0, qty_whitemarket / 5.0)
+                    score += qty_score * 0.2  # 20% do peso
             
-            # Score baseado no tempo médio de venda
-            if 'avg_sale_time' in liquidity_data:
-                avg_time = liquidity_data['avg_sale_time']
-                if avg_time is not None and avg_time > 0:
-                    # Normaliza tempo (assumindo que <24h é bom)
-                    time_score = max(0.0, 1.0 - (avg_time / 24.0))
-                    score += time_score * 0.1  # 10% do peso
+            # Score baseado na quantidade disponível no CSFloat
+            if 'qty_csfloat' in liquidity_data:
+                qty_csfloat = liquidity_data['qty_csfloat']
+                if qty_csfloat is not None and qty_csfloat > 0:
+                    # Normaliza quantidade (assumindo que >5 é bom)
+                    qty_score = min(1.0, qty_csfloat / 5.0)
+                    score += qty_score * 0.2  # 20% do peso
             
             # Garante que o score esteja entre 0.0 e 1.0
             final_score = max(0.0, min(1.0, score))
             
             logger.debug(f"Score de liquidez calculado: {final_score:.3f} para {item.get('name')}")
+            logger.debug(f"Detalhes: DB={liquidity_data.get('liquidity_score', 0):.3f}, WM={liquidity_data.get('qty_whitemarket', 0)}, CS={liquidity_data.get('qty_csfloat', 0)}")
+            
             return final_score
             
         except Exception as e:

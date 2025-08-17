@@ -68,12 +68,20 @@ class ProfitFilter:
             
             # Prioriza o preço do Buff163 como referência principal
             buff163_price = reference_prices.get('buff163')
+            buff163_offer = reference_prices.get('buff163_offer')
             
             if buff163_price:
-                # Calcula lucro baseado no preço do Buff163
+                # Calcula lucro baseado no preço de venda do Buff163
                 profit_percentage = ((buff163_price - current_price) / current_price) * 100
-                logger.debug(f"Lucro calculado vs Buff163: {profit_percentage:.2f}% para {item.get('name')}")
+                logger.debug(f"Lucro calculado vs Buff163 (venda): {profit_percentage:.2f}% para {item.get('name')}")
                 logger.debug(f"Preço atual: ${current_price}, Preço Buff163: ${buff163_price}")
+                return profit_percentage
+            
+            elif buff163_offer:
+                # Fallback: usa o highest offer do Buff163 se preço de venda não disponível
+                profit_percentage = ((buff163_offer - current_price) / current_price) * 100
+                logger.debug(f"Lucro calculado vs Buff163 (offer): {profit_percentage:.2f}% para {item.get('name')}")
+                logger.debug(f"Preço atual: ${current_price}, Offer Buff163: ${buff163_offer}")
                 return profit_percentage
             
             # Fallback: usa o menor preço disponível se Buff163 não estiver disponível

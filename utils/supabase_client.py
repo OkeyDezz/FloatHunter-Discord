@@ -38,7 +38,7 @@ class SupabaseClient:
         Obtém preços de referência para um item da tabela market_data.
         
         Args:
-            market_hash_name: Market hash name do item
+            market_hash_name: Market hash name do item (usado como item_key)
             
         Returns:
             Dict com preços de referência ou None se não encontrado
@@ -48,10 +48,10 @@ class SupabaseClient:
                 logger.error("❌ Cliente Supabase não inicializado")
                 return None
             
-            # Busca preços de referência na tabela market_data
+            # Busca preços de referência na tabela market_data com estrutura real
             response = self.client.table('market_data').select(
-                'price_buff163, price_csgoempire, price_csfloat, price_whitemarket'
-            ).eq('market_hash_name', market_hash_name).execute()
+                'price_buff163, price_csfloat, price_whitemarket, highest_offer_buff163'
+            ).eq('item_key', market_hash_name).execute()
             
             if not response.data:
                 logger.debug(f"Sem dados de market_data para {market_hash_name}")
@@ -61,18 +61,19 @@ class SupabaseClient:
             prices = {}
             item_data = response.data[0]
             
-            # Adiciona preços disponíveis
+            # Adiciona preços disponíveis (usando estrutura real)
             if item_data.get('price_buff163'):
                 prices['buff163'] = float(item_data['price_buff163'])
-            
-            if item_data.get('price_csgoempire'):
-                prices['csgoempire'] = float(item_data['price_csgoempire'])
             
             if item_data.get('price_csfloat'):
                 prices['csfloat'] = float(item_data['price_csfloat'])
             
             if item_data.get('price_whitemarket'):
                 prices['whitemarket'] = float(item_data['price_whitemarket'])
+            
+            # Adiciona highest offer do Buff163 como referência adicional
+            if item_data.get('highest_offer_buff163'):
+                prices['buff163_offer'] = float(item_data['highest_offer_buff163'])
             
             logger.debug(f"Preços encontrados para {market_hash_name}: {prices}")
             return prices if prices else None
@@ -83,10 +84,10 @@ class SupabaseClient:
     
     async def get_liquidity_data(self, market_hash_name: str) -> Optional[Dict[str, Any]]:
         """
-        Obtém dados de liquidez para um item da tabela market_data.
+        Obtém dados de liquidez para um item da tabela liquidity.
         
         Args:
-            market_hash_name: Market hash name do item
+            market_hash_name: Market hash name do item (usado como item_key)
             
         Returns:
             Dict com dados de liquidez ou None se não encontrado
@@ -96,21 +97,29 @@ class SupabaseClient:
                 logger.error("❌ Cliente Supabase não inicializado")
                 return None
             
-            # Busca dados de liquidez da tabela market_data
-            response = self.client.table('market_data').select(
-                'liquidity_score, volume_24h, avg_sale_time, updated_at'
-            ).eq('market_hash_name', market_hash_name).execute()
+            # Busca dados de liquidez da tabela liquidity com estrutura real
+            response = self.client.table('liquidity').select(
+                'liquidity_score'
+            ).eq('item_key', market_hash_name).execute()
             
             if not response.data:
                 logger.debug(f"Sem dados de liquidez para {market_hash_name}")
                 return None
             
             item = response.data[0]
+            
+            # Busca dados adicionais da tabela market_data para complementar
+            market_response = self.client.table('market_data').select(
+                'qty_whitemarket, qty_csfloat, fetched_at'
+            ).eq('item_key', market_hash_name).execute()
+            
+            market_data = market_response.data[0] if market_response.data else {}
+            
             return {
                 'liquidity_score': item.get('liquidity_score', 0.0),
-                'volume_24h': item.get('volume_24h', 0),
-                'avg_sale_time': item.get('avg_sale_time', 0),
-                'updated_at': item.get('updated_at')
+                'qty_whitemarket': market_data.get('qty_whitemarket', 0),
+                'qty_csfloat': market_data.get('qty_csfloat', 0),
+                'fetched_at': market_data.get('fetched_at')
             }
             
         except Exception as e:
@@ -169,7 +178,7 @@ class SupabaseClient:
                 logger.error("❌ Cliente Supabase não inicializado")
                 return None
             
-            # Busca estatísticas do marketplace na tabela market_data
+            # Busca estatísticas do marketplace na tabela market_data com estrutura real
             price_column = f"price_{marketplace}"
             
             response = self.client.table('market_data').select(
@@ -201,7 +210,7 @@ class SupabaseClient:
             if not self.client:
                 return False
             
-            # Tenta fazer uma query simples
+            # Tenta fazer uma query simples na tabela market_data
             response = self.client.table('market_data').select('count').limit(1).execute()
             return True
             

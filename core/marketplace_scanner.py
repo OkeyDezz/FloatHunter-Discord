@@ -143,8 +143,14 @@ class MarketplaceScanner:
                     self._last_data_received = time.time()
                     logger.info("✅ Autenticado em /trade e filtros de LEILÃO configurados")
                 else:
-                    # Não autenticado - apenas log, a autenticação será feita pelo método _authenticate_websocket
-                    logger.info("🆔 Usuário não autenticado no init - aguardando autenticação manual...")
+                    # Não autenticado - executa autenticação manual IMEDIATAMENTE
+                    logger.info("🆔 Usuário não autenticado no init - executando autenticação manual...")
+                    
+                    # Executa autenticação manual
+                    if await self._authenticate_websocket():
+                        logger.info("✅ Autenticação manual bem-sucedida!")
+                    else:
+                        logger.error("❌ Falha na autenticação manual")
                     
             except Exception as e:
                 logger.error(f"❌ Erro no init: {e}")
@@ -584,17 +590,15 @@ class MarketplaceScanner:
                 self.reconnect_attempts += 1
                 return False
             
-            # Aguarda um pouco para o evento init chegar
-            logger.info("⏳ Aguardando evento init...")
-            await asyncio.sleep(3)
+            # Aguarda um pouco para o evento init chegar e ser processado
+            logger.info("⏳ Aguardando processamento do evento init...")
+            await asyncio.sleep(5)
             
-            # Se não foi autenticado pelo evento init, tenta autenticação manual
+            # Verifica se foi autenticado
             if not self.authenticated:
-                logger.info("🔄 Evento init não autenticou, tentando autenticação manual...")
-                if not await self._authenticate_websocket():
-                    logger.error("❌ Falha na autenticação WebSocket")
-                    self.reconnect_attempts += 1
-                    return False
+                logger.error("❌ Falha na autenticação após evento init")
+                self.reconnect_attempts += 1
+                return False
             
             # Reset de tentativas se conectou com sucesso
             self.reconnect_attempts = 0

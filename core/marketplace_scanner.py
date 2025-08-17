@@ -468,13 +468,7 @@ class MarketplaceScanner:
                 return False
             logger.info("✅ Conexão com Supabase OK")
             
-            # Verifica API key antes de tentar conectar
-            if not await self._verify_api_key():
-                logger.error("❌ API key inválida ou não funcionando")
-                self.reconnect_attempts += 1
-                return False
-            
-            # Obtém metadata
+            # Obtém metadata (já verifica API key indiretamente)
             if not await self._get_socket_metadata():
                 logger.error("❌ Falha ao obter metadata")
                 self.reconnect_attempts += 1
@@ -569,41 +563,6 @@ class MarketplaceScanner:
                     
         except Exception as e:
             logger.error(f"❌ Erro ao obter metadata: {e}")
-            return False
-    
-    async def _verify_api_key(self) -> bool:
-        """Verifica se a API key está funcionando corretamente."""
-        try:
-            logger.info("🔑 Verificando API key do CSGOEmpire...")
-            
-            # Testa endpoint de usuário para verificar se a API key é válida
-            url = "https://csgoempire.com/api/v2/user"
-            headers = {
-                "Authorization": f"Bearer {self.settings.CSGOEMPIRE_API_KEY}",
-                "Accept": "application/json",
-                "User-Agent": "Mozilla/5.0"
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        user_data = await response.json()
-                        if user_data.get('success') and user_data.get('data', {}).get('id'):
-                            user_id = user_data['data']['id']
-                            logger.info(f"✅ API key válida - Usuário ID: {user_id}")
-                            return True
-                        else:
-                            logger.error("❌ API key retornou dados inválidos")
-                            return False
-                    elif response.status == 401:
-                        logger.error("❌ API key inválida ou expirada (401 Unauthorized)")
-                        return False
-                    else:
-                        logger.error(f"❌ Erro ao verificar API key: {response.status}")
-                        return False
-                        
-        except Exception as e:
-            logger.error(f"❌ Erro ao verificar API key: {e}")
             return False
     
     def set_opportunity_callback(self, callback: Callable):

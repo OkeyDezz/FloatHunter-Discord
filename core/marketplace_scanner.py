@@ -13,6 +13,7 @@ from filters.profit_filter import ProfitFilter
 from filters.liquidity_filter import LiquidityFilter
 from utils.supabase_client import SupabaseClient
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -133,39 +134,8 @@ class MarketplaceScanner:
                     self._last_data_received = time.time()
                     logger.info("✅ Autenticado em /trade e filtros enviados")
                 else:
-                    # Não autenticado - precisa emitir evento 'identify'
-                    logger.info("🆔 Usuário não autenticado, emitindo identify...")
-                    
-                    # Verifica se temos todos os dados necessários
-                    if not all([self.user_id, self.user_model, self.socket_token, self.socket_signature]):
-                        logger.error("❌ Dados incompletos para identify:")
-                        logger.error(f"  - user_id: {self.user_id}")
-                        logger.error(f"  - user_model: {self.user_model}")
-                        logger.error(f"  - socket_token: {self.socket_token[:20] if self.socket_token else 'None'}...")
-                        logger.error(f"  - socket_signature: {self.socket_signature[:20] if self.socket_signature else 'None'}...")
-                        return
-                    
-                    # Emite evento identify com dados de autenticação
-                    identify_payload = {
-                        "uid": self.user_id,
-                        "model": self.user_model,
-                        "authorizationToken": self.socket_token,
-                        "signature": self.socket_signature
-                    }
-                    
-                    logger.info(f"📤 Emitindo identify com uid: {self.user_id}")
-                    logger.info(f"📤 Payload completo: {identify_payload}")
-                    
-                    try:
-                        await self.sio.emit('identify', identify_payload, namespace='/trade')
-                        logger.info("✅ Evento identify emitido com sucesso")
-                    except Exception as e:
-                        logger.error(f"❌ Erro ao emitir identify: {e}")
-                        import traceback
-                        logger.error(f"Traceback: {traceback.format_exc()}")
-                        return
-                    
-                    logger.info("⏳ Identify enviado, aguardando autenticação...")
+                    # Não autenticado - apenas log, a autenticação será feita pelo método _authenticate_websocket
+                    logger.info("🆔 Usuário não autenticado no init - aguardando autenticação manual...")
                     
             except Exception as e:
                 logger.error(f"❌ Erro no init: {e}")
@@ -451,7 +421,7 @@ class MarketplaceScanner:
         self._last_data_received = time.time()
     
     async def _connect_websocket(self) -> bool:
-        """Conecta ao WebSocket do CSGOEmpire."""
+        """Conecta ao WebSocket do CSGOEmpire seguindo exatamente a documentação."""
         try:
             # Verifica se já está conectado
             if self.sio.connected:
@@ -525,6 +495,61 @@ class MarketplaceScanner:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
+    async def _authenticate_websocket(self) -> bool:
+        """Autentica no WebSocket seguindo exatamente a documentação do CSGOEmpire."""
+        try:
+            logger.info("🔐 Iniciando autenticação WebSocket...")
+            
+            # Verifica se temos todos os dados necessários
+            if not all([self.user_id, self.user_model, self.socket_token, self.socket_signature]):
+                logger.error("❌ Dados incompletos para autenticação:")
+                logger.error(f"  - user_id: {self.user_id}")
+                logger.error(f"  - user_model: {self.user_model}")
+                logger.error(f"  - socket_token: {self.socket_token[:20] if self.socket_token else 'None'}...")
+                logger.error(f"  - socket_signature: {self.socket_signature[:20] if self.socket_signature else 'None'}...")
+                return False
+            
+            # Payload exatamente como na documentação
+            identify_payload = {
+                "uid": self.user_id,
+                "model": self.user_model,
+                "authorizationToken": self.socket_token,
+                "signature": self.socket_signature,
+                "uuid": str(uuid.uuid4())  # UUID opcional como na documentação
+            }
+            
+            logger.info(f"📤 Emitindo identify com uid: {self.user_id}")
+            logger.info(f"📤 Payload completo: {identify_payload}")
+            
+            try:
+                await self.sio.emit('identify', identify_payload, namespace='/trade')
+                logger.info("✅ Evento identify emitido com sucesso")
+            except Exception as e:
+                logger.error(f"❌ Erro ao emitir identify: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return False
+            
+            logger.info("⏳ Identify enviado, aguardando autenticação...")
+            
+            # Aguarda autenticação
+            for i in range(30):  # 30 segundos timeout para autenticação
+                if self.authenticated:
+                    logger.info("✅ Autenticação confirmada!")
+                    return True
+                if i % 5 == 0:  # Log a cada 5 segundos
+                    logger.info(f"⏳ Aguardando confirmação de autenticação... ({i}s)")
+                await asyncio.sleep(1)
+            
+            logger.error("❌ Timeout aguardando confirmação de autenticação")
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Erro na autenticação: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
+    
     async def connect(self) -> bool:
         """Conecta ao WebSocket do CSGOEmpire."""
         try:
@@ -563,9 +588,15 @@ class MarketplaceScanner:
                 self.reconnect_attempts += 1
                 return False
             
+            # Autentica no WebSocket
+            if not await self._authenticate_websocket():
+                logger.error("❌ Falha na autenticação WebSocket")
+                self.reconnect_attempts += 1
+                return False
+            
             # Reset de tentativas se conectou com sucesso
             self.reconnect_attempts = 0
-            logger.info("✅ Conectado com sucesso ao WebSocket")
+            logger.info("✅ Conectado e autenticado com sucesso ao WebSocket")
             return True
             
         except Exception as e:

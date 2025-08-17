@@ -103,12 +103,21 @@ class MarketplaceScanner:
                 
                 if isinstance(data, dict) and data.get('authenticated'):
                     # Já autenticado - emite eventos necessários
+                    logger.info("✅ Usuário já autenticado, configurando filtros...")
+                    
                     await self.sio.emit('filters', {"enabled": False}, namespace='/trade')
+                    logger.info("📤 Filtros enviados: enabled=False")
+                    
                     await self.sio.emit('allowedEvents', {
                         'events': ['new_item','updated_item','auction_update','deleted_item','trade_status','timesync']
                     }, namespace='/trade')
+                    logger.info("📤 Eventos permitidos configurados")
+                    
                     await self.sio.emit('subscribe', ['trading', 'auctions'], namespace='/trade')
+                    logger.info("📤 Inscrição em trading/auctions enviada")
+                    
                     await self.sio.emit('timesync', namespace='/trade')
+                    logger.info("📤 Timesync solicitado")
                     
                     self.authenticated = True
                     self.is_connected = True
@@ -116,7 +125,7 @@ class MarketplaceScanner:
                     logger.info("✅ Autenticado em /trade e filtros enviados")
                 else:
                     # Não autenticado - precisa emitir evento 'identify'
-                    logger.info("🆔 Emitindo evento identify para autenticação...")
+                    logger.info("🆔 Usuário não autenticado, emitindo identify...")
                     
                     # Emite evento identify com dados de autenticação
                     identify_payload = {
@@ -126,10 +135,10 @@ class MarketplaceScanner:
                         "signature": self.socket_signature
                     }
                     
-                    logger.info(f"📤 Emitindo identify: {identify_payload}")
+                    logger.info(f"📤 Emitindo identify com uid: {self.user_id}")
                     await self.sio.emit('identify', identify_payload, namespace='/trade')
                     
-                    logger.info("⏳ Aguardando autenticação após identify...")
+                    logger.info("⏳ Identify enviado, aguardando autenticação...")
                     
             except Exception as e:
                 logger.error(f"❌ Erro no init: {e}")
@@ -139,23 +148,22 @@ class MarketplaceScanner:
         @self.sio.on('new_item', namespace='/trade')
         async def on_new_item(data):
             """Novo item disponível."""
-            logger.info(f"🆕 Novo item recebido: {data.get('name', 'Unknown')}")
+            logger.info(f"🆕 Novo item recebido: {data.get('market_name', 'Unknown')}")
             self._update_last_data_received()
             await self._process_item(data, 'new_item')
         
         @self.sio.on('updated_item', namespace='/trade')
         async def on_updated_item(data):
             """Item atualizado."""
-            logger.debug(f"🔄 Item atualizado: {data.get('name', 'Unknown')}")
+            logger.debug(f"🔄 Item atualizado: {data.get('market_name', 'Unknown')}")
             self._update_last_data_received()
             await self._process_item(data, 'updated_item')
         
         @self.sio.on('deleted_item', namespace='/trade')
         async def on_deleted_item(data):
             """Item removido."""
-            logger.debug(f"🗑️ Item removido: {data.get('name', 'Unknown')}")
+            logger.debug(f"🗑️ Item removido: {data}")
             self._update_last_data_received()
-            await self._process_item(data, 'removed_item')
         
         @self.sio.on('auction_update', namespace='/trade')
         async def on_auction_update(data):
@@ -166,7 +174,7 @@ class MarketplaceScanner:
         @self.sio.on('timesync', namespace='/trade')
         async def on_timesync(data):
             """Sincronização de tempo."""
-            logger.debug("⏰ Timesync recebido")
+            logger.debug(f"⏰ Timesync recebido: {data}")
             self._update_last_data_received()
         
         @self.sio.on('trade_status', namespace='/trade')
@@ -401,9 +409,13 @@ class MarketplaceScanner:
             
             if not all([self.user_id, self.socket_token, self.socket_signature]):
                 logger.error("❌ Dados de autenticação incompletos")
+                logger.error(f"  - user_id: {self.user_id}")
+                logger.error(f"  - socket_token: {self.socket_token[:20]}..." if self.socket_token else "None")
+                logger.error(f"  - socket_signature: {self.socket_signature[:20]}..." if self.socket_signature else "None")
                 return False
             
             # Configura handlers
+            logger.info("🔧 Configurando handlers de eventos...")
             self._setup_socket_events()
             
             # Headers usados pelo bot principal
@@ -428,6 +440,7 @@ class MarketplaceScanner:
             )
             
             logger.info("🔌 WebSocket conectado ao namespace /trade")
+            logger.info("⏳ Aguardando evento init...")
             
             # Aguarda evento 'init' e autenticação completa
             logger.info("⏳ Aguardando evento init e autenticação...")
@@ -444,10 +457,16 @@ class MarketplaceScanner:
                 return True
             else:
                 logger.error("❌ Timeout aguardando autenticação após identify")
+                logger.error("📊 Status atual:")
+                logger.error(f"  - sio.connected: {self.sio.connected}")
+                logger.error(f"  - authenticated: {self.authenticated}")
+                logger.error(f"  - is_connected: {self.is_connected}")
                 return False
                 
         except Exception as e:
             logger.error(f"❌ Erro ao conectar WebSocket: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def connect(self) -> bool:

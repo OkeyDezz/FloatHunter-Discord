@@ -96,6 +96,11 @@ class MarketplaceScanner:
             """Evento de inicialização (mesmo do bot principal)."""
             logger.info(f"📡 Evento init recebido: {data}")
             try:
+                # Verifica se é uma lista (alguns eventos retornam listas)
+                if isinstance(data, list):
+                    logger.warning(f"⚠️ Evento init retornou lista: {data}")
+                    return
+                
                 if isinstance(data, dict) and data.get('authenticated'):
                     # Emite eventos necessários (mesmo do bot principal)
                     await self.sio.emit('filters', {"enabled": False}, namespace='/trade')
@@ -110,9 +115,16 @@ class MarketplaceScanner:
                     self._last_data_received = time.time()
                     logger.info("✅ Autenticado em /trade e filtros enviados")
                 else:
-                    logger.warning("ℹ️ init sem authenticated=true")
+                    # Se não está autenticado, pode ser um problema com a API key
+                    logger.warning(f"ℹ️ init sem authenticated=true - dados: {data}")
+                    if data.get('isGuest', False):
+                        logger.error("❌ CSGOEmpire está tratando como usuário convidado - verifique a API key")
+                    else:
+                        logger.warning("⚠️ Aguardando autenticação...")
             except Exception as e:
                 logger.error(f"❌ Erro no init: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
         @self.sio.on('new_item', namespace='/trade')
         async def on_new_item(data):
@@ -162,8 +174,21 @@ class MarketplaceScanner:
         @self.sio.on('*', namespace='/trade')
         async def catch_all(event_name, data):
             """Captura todos os eventos para debug."""
-            logger.debug(f"📨 Evento recebido: {event_name} - {type(data).__name__}")
-            self._update_last_data_received()
+            try:
+                # Verifica se é uma lista ou dicionário
+                if isinstance(data, list):
+                    logger.debug(f"📨 Evento recebido: {event_name} - Lista com {len(data)} itens")
+                    self._update_last_data_received()
+                elif isinstance(data, dict):
+                    logger.debug(f"📨 Evento recebido: {event_name} - {type(data).__name__}")
+                    self._update_last_data_received()
+                else:
+                    logger.debug(f"📨 Evento recebido: {event_name} - Tipo: {type(data).__name__}")
+                    self._update_last_data_received()
+            except Exception as e:
+                logger.error(f"❌ Erro no handler genérico para evento {event_name}: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
     
     async def _identify_and_configure(self):
         """Identifica e configura filtros no WebSocket."""
@@ -396,7 +421,7 @@ class MarketplaceScanner:
             
             # Aguarda evento 'init' com authenticated=true (mesmo do bot principal)
             logger.info("⏳ Aguardando evento init com authenticated=true...")
-            for i in range(30):  # 30 segundos timeout (mesmo do bot principal)
+            for i in range(45):  # 45 segundos timeout (aumentado para dar tempo)
                 if self.authenticated:
                     logger.info("✅ WebSocket autenticado com sucesso via init")
                     break
@@ -408,7 +433,13 @@ class MarketplaceScanner:
                 logger.info("✅ WebSocket autenticado com sucesso")
                 return True
             else:
-                logger.error("❌ Timeout aguardando evento init")
+                logger.error("❌ Timeout aguardando evento init - tentando reconectar...")
+                # Tenta desconectar e reconectar
+                try:
+                    await self.sio.disconnect()
+                    logger.info("🔌 Desconectado para tentar reconectar...")
+                except:
+                    pass
                 return False
                 
         except Exception as e:
@@ -436,6 +467,12 @@ class MarketplaceScanner:
                 logger.error("❌ Falha na conexão com Supabase")
                 return False
             logger.info("✅ Conexão com Supabase OK")
+            
+            # Verifica API key antes de tentar conectar
+            if not await self._verify_api_key():
+                logger.error("❌ API key inválida ou não funcionando")
+                self.reconnect_attempts += 1
+                return False
             
             # Obtém metadata
             if not await self._get_socket_metadata():
@@ -532,6 +569,41 @@ class MarketplaceScanner:
                     
         except Exception as e:
             logger.error(f"❌ Erro ao obter metadata: {e}")
+            return False
+    
+    async def _verify_api_key(self) -> bool:
+        """Verifica se a API key está funcionando corretamente."""
+        try:
+            logger.info("🔑 Verificando API key do CSGOEmpire...")
+            
+            # Testa endpoint de usuário para verificar se a API key é válida
+            url = "https://csgoempire.com/api/v2/user"
+            headers = {
+                "Authorization": f"Bearer {self.settings.CSGOEMPIRE_API_KEY}",
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0"
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        user_data = await response.json()
+                        if user_data.get('success') and user_data.get('data', {}).get('id'):
+                            user_id = user_data['data']['id']
+                            logger.info(f"✅ API key válida - Usuário ID: {user_id}")
+                            return True
+                        else:
+                            logger.error("❌ API key retornou dados inválidos")
+                            return False
+                    elif response.status == 401:
+                        logger.error("❌ API key inválida ou expirada (401 Unauthorized)")
+                        return False
+                    else:
+                        logger.error(f"❌ Erro ao verificar API key: {response.status}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ Erro ao verificar API key: {e}")
             return False
     
     def set_opportunity_callback(self, callback: Callable):

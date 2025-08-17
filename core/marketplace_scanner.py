@@ -102,7 +102,7 @@ class MarketplaceScanner:
                     return
                 
                 if isinstance(data, dict) and data.get('authenticated'):
-                    # Emite eventos necessários (mesmo do bot principal)
+                    # Já autenticado - emite eventos necessários
                     await self.sio.emit('filters', {"enabled": False}, namespace='/trade')
                     await self.sio.emit('allowedEvents', {
                         'events': ['new_item','updated_item','auction_update','deleted_item','trade_status','timesync']
@@ -115,12 +115,22 @@ class MarketplaceScanner:
                     self._last_data_received = time.time()
                     logger.info("✅ Autenticado em /trade e filtros enviados")
                 else:
-                    # Se não está autenticado, pode ser um problema com a API key
-                    logger.warning(f"ℹ️ init sem authenticated=true - dados: {data}")
-                    if data.get('isGuest', False):
-                        logger.error("❌ CSGOEmpire está tratando como usuário convidado - verifique a API key")
-                    else:
-                        logger.warning("⚠️ Aguardando autenticação...")
+                    # Não autenticado - precisa emitir evento 'identify'
+                    logger.info("🆔 Emitindo evento identify para autenticação...")
+                    
+                    # Emite evento identify com dados de autenticação
+                    identify_payload = {
+                        "uid": self.user_id,
+                        "model": self.user_model,
+                        "authorizationToken": self.socket_token,
+                        "signature": self.socket_signature
+                    }
+                    
+                    logger.info(f"📤 Emitindo identify: {identify_payload}")
+                    await self.sio.emit('identify', identify_payload, namespace='/trade')
+                    
+                    logger.info("⏳ Aguardando autenticação após identify...")
+                    
             except Exception as e:
                 logger.error(f"❌ Erro no init: {e}")
                 import traceback
@@ -419,27 +429,21 @@ class MarketplaceScanner:
             
             logger.info("🔌 WebSocket conectado ao namespace /trade")
             
-            # Aguarda evento 'init' com authenticated=true (mesmo do bot principal)
-            logger.info("⏳ Aguardando evento init com authenticated=true...")
-            for i in range(45):  # 45 segundos timeout (aumentado para dar tempo)
+            # Aguarda evento 'init' e autenticação completa
+            logger.info("⏳ Aguardando evento init e autenticação...")
+            for i in range(60):  # 60 segundos timeout (aumentado para dar tempo ao identify)
                 if self.authenticated:
-                    logger.info("✅ WebSocket autenticado com sucesso via init")
+                    logger.info("✅ WebSocket autenticado com sucesso via identify")
                     break
-                if i % 5 == 0:  # Log a cada 5 segundos
-                    logger.info(f"⏳ Aguardando init... ({i}s)")
+                if i % 10 == 0:  # Log a cada 10 segundos
+                    logger.info(f"⏳ Aguardando autenticação... ({i}s)")
                 await asyncio.sleep(1)
             
             if self.authenticated:
                 logger.info("✅ WebSocket autenticado com sucesso")
                 return True
             else:
-                logger.error("❌ Timeout aguardando evento init - tentando reconectar...")
-                # Tenta desconectar e reconectar
-                try:
-                    await self.sio.disconnect()
-                    logger.info("🔌 Desconectado para tentar reconectar...")
-                except:
-                    pass
+                logger.error("❌ Timeout aguardando autenticação após identify")
                 return False
                 
         except Exception as e:

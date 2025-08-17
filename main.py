@@ -74,6 +74,13 @@ class OpportunityBot:
                 logger.error("❌ Configurações inválidas")
                 return False
             
+            # Testa conexão com Supabase
+            logger.info("🔍 Testando conexão com Supabase...")
+            if not await self.scanner.supabase.test_connection():
+                logger.error("❌ Falha na conexão com Supabase")
+                return False
+            logger.info("✅ Conexão com Supabase OK")
+            
             # Inicializa Discord
             logger.info("🤖 Inicializando Discord...")
             if not await self.discord_poster.initialize():
@@ -91,6 +98,7 @@ class OpportunityBot:
         """Executa o bot."""
         try:
             if not await self.initialize():
+                logger.error("❌ Falha na inicialização, encerrando...")
                 return
             
             self.running = True

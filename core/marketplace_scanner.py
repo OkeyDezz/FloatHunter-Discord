@@ -15,6 +15,7 @@ import aiohttp
 from config.settings import Settings
 from filters.profit_filter import ProfitFilter
 from filters.liquidity_filter import LiquidityFilter
+from utils.supabase_client import SupabaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,9 @@ class MarketplaceScanner:
         # Filtros
         self.profit_filter = ProfitFilter(self.settings.MIN_PROFIT_PERCENTAGE)
         self.liquidity_filter = LiquidityFilter(self.settings.MIN_LIQUIDITY_SCORE)
+        
+        # Supabase client
+        self.supabase = SupabaseClient()
         
         # Callback para oportunidades encontradas
         self.opportunity_callback: Optional[Callable] = None
@@ -169,7 +173,7 @@ class MarketplaceScanner:
                 return
             
             # Aplica filtros
-            if self._check_filters(item):
+            if await self._check_filters(item):
                 logger.info(f"🎯 Oportunidade encontrada: {item.get('name', 'Unknown')}")
                 
                 # Chama callback se configurado
@@ -197,6 +201,7 @@ class MarketplaceScanner:
                 'float_value': item_data.get('float_value'),
                 'rarity': item_data.get('rarity'),
                 'type': item_data.get('type'),
+                'marketplace': 'csgoempire',  # Adiciona marketplace explicitamente
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -235,6 +240,14 @@ class MarketplaceScanner:
     async def connect(self) -> bool:
         """Conecta ao WebSocket do CSGOEmpire."""
         try:
+            # Testa conexão com Supabase primeiro
+            logger.info("🔍 Testando conexão com Supabase...")
+            if not await self.supabase.test_connection():
+                logger.error("❌ Falha na conexão com Supabase")
+                return False
+            
+            logger.info("✅ Conexão com Supabase OK")
+            
             # Obtém metadata para autenticação
             if not await self._get_socket_metadata():
                 return False

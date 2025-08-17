@@ -43,7 +43,7 @@ class ProfitFilter:
     
     async def calculate_profit_potential(self, item: Dict) -> Optional[float]:
         """
-        Calcula o potencial de lucro do item comparando com outros marketplaces.
+        Calcula o potencial de lucro do item comparando com o preço do Buff163.
         
         Args:
             item: Dicionário com dados do item
@@ -59,29 +59,28 @@ class ProfitFilter:
                 logger.debug("Dados insuficientes para calcular lucro")
                 return None
             
-            # Obtém preços de referência do Supabase
+            # Obtém preços de referência do Supabase (especialmente Buff163)
             reference_prices = await self.supabase.get_reference_prices(market_hash_name)
             
             if not reference_prices:
                 logger.debug(f"Sem preços de referência para {market_hash_name}")
                 return None
             
-            # Remove o preço atual do marketplace atual
-            current_marketplace = item.get('marketplace', 'csgoempire')
-            if current_marketplace in reference_prices:
-                del reference_prices[current_marketplace]
+            # Prioriza o preço do Buff163 como referência principal
+            buff163_price = reference_prices.get('buff163')
             
-            if not reference_prices:
-                logger.debug("Sem outros marketplaces para comparação")
-                return None
+            if buff163_price:
+                # Calcula lucro baseado no preço do Buff163
+                profit_percentage = ((buff163_price - current_price) / current_price) * 100
+                logger.debug(f"Lucro calculado vs Buff163: {profit_percentage:.2f}% para {item.get('name')}")
+                logger.debug(f"Preço atual: ${current_price}, Preço Buff163: ${buff163_price}")
+                return profit_percentage
             
-            # Calcula o melhor preço de referência
-            best_reference_price = min(reference_prices.values())
-            
-            # Calcula percentual de lucro
-            if best_reference_price > 0:
+            # Fallback: usa o menor preço disponível se Buff163 não estiver disponível
+            if len(reference_prices) > 0:
+                best_reference_price = min(reference_prices.values())
                 profit_percentage = ((best_reference_price - current_price) / current_price) * 100
-                logger.debug(f"Lucro calculado: {profit_percentage:.2f}% para {item.get('name')}")
+                logger.debug(f"Lucro calculado vs melhor preço disponível: {profit_percentage:.2f}% para {item.get('name')}")
                 return profit_percentage
             
             return None

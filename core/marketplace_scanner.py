@@ -91,6 +91,12 @@ class MarketplaceScanner:
             self.is_connected = False
             self.authenticated = False
         
+        @self.sio.on('identify', namespace='/trade')
+        async def on_identify_response(data):
+            """Resposta do evento identify."""
+            logger.info(f"🆔 Resposta do identify recebida: {data}")
+            self._update_last_data_received()
+        
         @self.sio.on('init', namespace='/trade')
         async def on_init(data):
             """Evento de inicialização (mesmo do bot principal)."""
@@ -127,6 +133,15 @@ class MarketplaceScanner:
                     # Não autenticado - precisa emitir evento 'identify'
                     logger.info("🆔 Usuário não autenticado, emitindo identify...")
                     
+                    # Verifica se temos todos os dados necessários
+                    if not all([self.user_id, self.user_model, self.socket_token, self.socket_signature]):
+                        logger.error("❌ Dados incompletos para identify:")
+                        logger.error(f"  - user_id: {self.user_id}")
+                        logger.error(f"  - user_model: {self.user_model}")
+                        logger.error(f"  - socket_token: {self.socket_token[:20] if self.socket_token else 'None'}...")
+                        logger.error(f"  - socket_signature: {self.socket_signature[:20] if self.socket_signature else 'None'}...")
+                        return
+                    
                     # Emite evento identify com dados de autenticação
                     identify_payload = {
                         "uid": self.user_id,
@@ -136,7 +151,16 @@ class MarketplaceScanner:
                     }
                     
                     logger.info(f"📤 Emitindo identify com uid: {self.user_id}")
-                    await self.sio.emit('identify', identify_payload, namespace='/trade')
+                    logger.info(f"📤 Payload completo: {identify_payload}")
+                    
+                    try:
+                        await self.sio.emit('identify', identify_payload, namespace='/trade')
+                        logger.info("✅ Evento identify emitido com sucesso")
+                    except Exception as e:
+                        logger.error(f"❌ Erro ao emitir identify: {e}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
+                        return
                     
                     logger.info("⏳ Identify enviado, aguardando autenticação...")
                     
@@ -188,20 +212,36 @@ class MarketplaceScanner:
             """Erro do servidor."""
             logger.error(f"❌ Erro do servidor WebSocket: {data}")
         
+        @self.sio.on('connect_error', namespace='/trade')
+        async def on_connect_error(data):
+            """Erro de conexão."""
+            logger.error(f"❌ Erro de conexão WebSocket: {data}")
+        
+        @self.sio.on('disconnect', namespace='/trade')
+        async def on_disconnect(data):
+            """Desconexão."""
+            logger.warning(f"🔌 Desconectado do WebSocket: {data}")
+            self.is_connected = False
+            self.authenticated = False
+        
         # Handler genérico para capturar todos os eventos (mesmo do bot principal)
         @self.sio.on('*', namespace='/trade')
         async def catch_all(event_name, data):
             """Captura todos os eventos para debug."""
             try:
+                # Ignora eventos que já temos handlers específicos
+                if event_name in ['init', 'identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'timesync', 'trade_status', 'error', 'connect_error', 'disconnect']:
+                    return
+                
                 # Verifica se é uma lista ou dicionário
                 if isinstance(data, list):
-                    logger.debug(f"📨 Evento recebido: {event_name} - Lista com {len(data)} itens")
+                    logger.info(f"📨 Evento não tratado: {event_name} - Lista com {len(data)} itens")
                     self._update_last_data_received()
                 elif isinstance(data, dict):
-                    logger.debug(f"📨 Evento recebido: {event_name} - {type(data).__name__}")
+                    logger.info(f"📨 Evento não tratado: {event_name} - {type(data).__name__}")
                     self._update_last_data_received()
                 else:
-                    logger.debug(f"📨 Evento recebido: {event_name} - Tipo: {type(data).__name__}")
+                    logger.info(f"📨 Evento não tratado: {event_name} - Tipo: {type(data).__name__}")
                     self._update_last_data_received()
             except Exception as e:
                 logger.error(f"❌ Erro no handler genérico para evento {event_name}: {e}")

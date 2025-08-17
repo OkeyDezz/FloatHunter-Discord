@@ -11,9 +11,11 @@ logger = logging.getLogger(__name__)
 class ProfitFilter:
     """Filtro para verificar se um item tem potencial de lucro."""
     
-    def __init__(self, min_profit_percentage: float = 5.0):
+    def __init__(self, min_profit_percentage: float = 5.0, coin_to_usd_factor: float = 0.614):
         self.min_profit_percentage = min_profit_percentage
         self.supabase = SupabaseClient()
+        # Fator de conversão de coin para dólar
+        self.coin_to_usd_factor = coin_to_usd_factor
     
     async def check(self, item: Dict) -> bool:
         """
@@ -43,7 +45,7 @@ class ProfitFilter:
     
     async def calculate_profit_potential(self, item: Dict) -> Optional[float]:
         """
-        Calcula o potencial de lucro do item comparando com o preço do Buff163.
+        Calcula o potencial de lucro comparando preço CSGOEmpire vs Buff163.
         
         Args:
             item: Dicionário com dados do item
@@ -53,45 +55,30 @@ class ProfitFilter:
         """
         try:
             market_hash_name = item.get('market_hash_name')
-            current_price = item.get('price')
+            price_csgoempire_coin = item.get('price')
             
-            if not market_hash_name or not current_price:
+            if not market_hash_name or not price_csgoempire_coin:
                 logger.debug("Dados insuficientes para calcular lucro")
                 return None
             
-            # Obtém preços de referência do Supabase (especialmente Buff163)
-            reference_prices = await self.supabase.get_reference_prices(market_hash_name)
+            # Converte preço do CSGOEmpire de coin para dólar
+            price_csgoempire_usd = price_csgoempire_coin * self.coin_to_usd_factor
             
-            if not reference_prices:
-                logger.debug(f"Sem preços de referência para {market_hash_name}")
+            # Obtém preço do Buff163 em dólar
+            price_buff163_usd = await self.supabase.get_buff163_price(market_hash_name)
+            
+            if not price_buff163_usd:
+                logger.debug(f"Sem preço Buff163 para {market_hash_name}")
                 return None
             
-            # Prioriza o preço do Buff163 como referência principal
-            buff163_price = reference_prices.get('buff163')
-            buff163_offer = reference_prices.get('buff163_offer')
+            # Calcula percentual de lucro
+            profit_percentage = ((price_buff163_usd - price_csgoempire_usd) / price_csgoempire_usd) * 100
             
-            if buff163_price:
-                # Calcula lucro baseado no preço de venda do Buff163
-                profit_percentage = ((buff163_price - current_price) / current_price) * 100
-                logger.debug(f"Lucro calculado vs Buff163 (venda): {profit_percentage:.2f}% para {item.get('name')}")
-                logger.debug(f"Preço atual: ${current_price}, Preço Buff163: ${buff163_price}")
-                return profit_percentage
+            logger.debug(f"Lucro calculado: {profit_percentage:.2f}% para {item.get('name')}")
+            logger.debug(f"Preço CSGOEmpire: {price_csgoempire_coin} coin = ${price_csgoempire_usd:.2f}")
+            logger.debug(f"Preço Buff163: ${price_buff163_usd:.2f}")
             
-            elif buff163_offer:
-                # Fallback: usa o highest offer do Buff163 se preço de venda não disponível
-                profit_percentage = ((buff163_offer - current_price) / current_price) * 100
-                logger.debug(f"Lucro calculado vs Buff163 (offer): {profit_percentage:.2f}% para {item.get('name')}")
-                logger.debug(f"Preço atual: ${current_price}, Offer Buff163: ${buff163_offer}")
-                return profit_percentage
-            
-            # Fallback: usa o menor preço disponível se Buff163 não estiver disponível
-            if len(reference_prices) > 0:
-                best_reference_price = min(reference_prices.values())
-                profit_percentage = ((best_reference_price - current_price) / current_price) * 100
-                logger.debug(f"Lucro calculado vs melhor preço disponível: {profit_percentage:.2f}% para {item.get('name')}")
-                return profit_percentage
-            
-            return None
+            return profit_percentage
             
         except Exception as e:
             logger.error(f"Erro ao calcular potencial de lucro: {e}")
@@ -105,3 +92,12 @@ class ProfitFilter:
         """Define o percentual mínimo de lucro."""
         self.min_profit_percentage = max(0.0, percentage)
         logger.info(f"Percentual mínimo de lucro atualizado para {self.min_profit_percentage}%")
+    
+    def get_coin_to_usd_factor(self) -> float:
+        """Retorna o fator de conversão de coin para dólar."""
+        return self.coin_to_usd_factor
+    
+    def set_coin_to_usd_factor(self, factor: float):
+        """Define o fator de conversão de coin para dólar."""
+        self.coin_to_usd_factor = factor
+        logger.info(f"Fator de conversão coin->USD atualizado para {self.coin_to_usd_factor}")

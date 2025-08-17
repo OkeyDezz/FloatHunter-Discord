@@ -29,6 +29,7 @@ MIN_PROFIT_PERCENTAGE=5.0
 MIN_LIQUIDITY_SCORE=0.7
 MIN_PRICE=1.0
 MAX_PRICE=1000.0
+COIN_TO_USD_FACTOR=0.614
 ```
 
 #### 2. Verificar Estrutura das Tabelas Supabase
@@ -45,19 +46,14 @@ stattrak BOOLEAN,
 souvenir BOOLEAN,
 condition TEXT,
 fetched_at TIMESTAMP,
-price_whitemarket DECIMAL(10,2),
-price_csfloat DECIMAL(10,2),
-price_buff163 DECIMAL(10,2),
-highest_offer_buff163 DECIMAL(10,2),
-qty_whitemarket INTEGER,
-qty_csfloat INTEGER
+price_buff163 DECIMAL(10,2)  -- Preço em dólar
 ```
 
 **Tabela `liquidity`:**
 ```sql
 -- Estrutura existente (NÃO ALTERAR)
 item_key TEXT PRIMARY KEY,
-liquidity_score DECIMAL(3,2)
+liquidity_score DECIMAL(3,2)  -- Score de 0.0 a 1.0
 ```
 
 #### 3. Verificar Logs do Railway
@@ -89,6 +85,7 @@ echo "Verificando variáveis..."
 echo "CSGOEMPIRE_API_KEY: $CSGOEMPIRE_API_KEY"
 echo "DISCORD_TOKEN: $DISCORD_TOKEN"
 echo "SUPABASE_URL: $SUPABASE_URL"
+echo "COIN_TO_USD_FACTOR: $COIN_TO_USD_FACTOR"
 ```
 
 ### Passo 2: Testar Conexão Supabase
@@ -162,19 +159,28 @@ python3 main.py
 - [ ] Health check responde corretamente
 - [ ] Logs não mostram erros críticos
 
-## 🔧 Como o Bot Funciona com as Tabelas
+## 🔧 Como o Bot Funciona Agora (Simplificado)
 
-### 1. Cálculo de Lucro
-- **Prioridade 1**: `price_buff163` (preço de venda)
-- **Prioridade 2**: `highest_offer_buff163` (maior oferta)
-- **Fallback**: Menor preço disponível entre CSFloat e WhiteMarket
+### 1. Cálculo de Lucro (Simples)
+- **Preço CSGOEmpire**: Converte de coin para dólar usando fator 0.614
+- **Preço Buff163**: Obtém diretamente da tabela `market_data`
+- **Cálculo**: `((preço_buff163 - preço_csgoempire_usd) / preço_csgoempire_usd) * 100`
 
-### 2. Cálculo de Liquidez
-- **60%**: `liquidity_score` da tabela `liquidity`
-- **20%**: Quantidade disponível no WhiteMarket (`qty_whitemarket`)
-- **20%**: Quantidade disponível no CSFloat (`qty_csfloat`)
+### 2. Cálculo de Liquidez (Direto)
+- **Usa diretamente**: `liquidity_score` da tabela `liquidity`
+- **Sem cálculos complexos**: Apenas compara com o mínimo configurado
 
 ### 3. Busca de Dados
-- Usa `item_key` para relacionar as tabelas
-- Não altera estrutura existente
-- Funciona com dados atuais
+- **Tabela `market_data`**: Apenas `price_buff163` (preço em dólar)
+- **Tabela `liquidity`**: Apenas `liquidity_score`
+- **Relacionamento**: Via `item_key`
+
+### 4. Exemplo de Funcionamento
+```
+Item detectado no CSGOEmpire: 1000 coin
+Conversão para USD: 1000 * 0.614 = $614.00
+Preço Buff163: $650.00
+Lucro calculado: ((650 - 614) / 614) * 100 = 5.86%
+Score liquidez: 0.8 (da tabela)
+Resultado: Passa nos filtros se MIN_PROFIT_PERCENTAGE < 5.86% e MIN_LIQUIDITY_SCORE < 0.8
+```

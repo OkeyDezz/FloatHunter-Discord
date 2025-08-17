@@ -30,7 +30,10 @@ class MarketplaceScanner:
         self.max_reconnect_attempts = 5
         
         # Filtros
-        self.profit_filter = ProfitFilter(self.settings.MIN_PROFIT_PERCENTAGE)
+        self.profit_filter = ProfitFilter(
+            self.settings.MIN_PROFIT_PERCENTAGE, 
+            self.settings.COIN_TO_USD_FACTOR
+        )
         self.liquidity_filter = LiquidityFilter(self.settings.MIN_LIQUIDITY_SCORE)
         
         # Supabase client

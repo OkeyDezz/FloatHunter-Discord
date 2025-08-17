@@ -33,97 +33,72 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar cliente Supabase: {e}")
     
-    async def get_reference_prices(self, market_hash_name: str) -> Optional[Dict[str, float]]:
+    async def get_buff163_price(self, market_hash_name: str) -> Optional[float]:
         """
-        Obtém preços de referência para um item da tabela market_data.
+        Obtém apenas o preço do Buff163 para um item.
         
         Args:
             market_hash_name: Market hash name do item (usado como item_key)
             
         Returns:
-            Dict com preços de referência ou None se não encontrado
+            float: Preço do Buff163 em dólar ou None se não encontrado
         """
         try:
             if not self.client:
                 logger.error("❌ Cliente Supabase não inicializado")
                 return None
             
-            # Busca preços de referência na tabela market_data com estrutura real
+            # Busca apenas o preço do Buff163 na tabela market_data
             response = self.client.table('market_data').select(
-                'price_buff163, price_csfloat, price_whitemarket, highest_offer_buff163'
+                'price_buff163'
             ).eq('item_key', market_hash_name).execute()
             
             if not response.data:
-                logger.debug(f"Sem dados de market_data para {market_hash_name}")
+                logger.debug(f"Sem preço Buff163 para {market_hash_name}")
                 return None
             
-            # Organiza preços por marketplace
-            prices = {}
-            item_data = response.data[0]
+            price_buff163 = response.data[0].get('price_buff163')
+            if price_buff163:
+                return float(price_buff163)
             
-            # Adiciona preços disponíveis (usando estrutura real)
-            if item_data.get('price_buff163'):
-                prices['buff163'] = float(item_data['price_buff163'])
-            
-            if item_data.get('price_csfloat'):
-                prices['csfloat'] = float(item_data['price_csfloat'])
-            
-            if item_data.get('price_whitemarket'):
-                prices['whitemarket'] = float(item_data['price_whitemarket'])
-            
-            # Adiciona highest offer do Buff163 como referência adicional
-            if item_data.get('highest_offer_buff163'):
-                prices['buff163_offer'] = float(item_data['highest_offer_buff163'])
-            
-            logger.debug(f"Preços encontrados para {market_hash_name}: {prices}")
-            return prices if prices else None
+            return None
             
         except Exception as e:
-            logger.error(f"❌ Erro ao buscar preços de referência: {e}")
+            logger.error(f"❌ Erro ao buscar preço Buff163: {e}")
             return None
     
-    async def get_liquidity_data(self, market_hash_name: str) -> Optional[Dict[str, Any]]:
+    async def get_liquidity_score(self, market_hash_name: str) -> Optional[float]:
         """
-        Obtém dados de liquidez para um item da tabela liquidity.
+        Obtém apenas o score de liquidez para um item.
         
         Args:
             market_hash_name: Market hash name do item (usado como item_key)
             
         Returns:
-            Dict com dados de liquidez ou None se não encontrado
+            float: Score de liquidez (0.0 a 1.0) ou None se não encontrado
         """
         try:
             if not self.client:
                 logger.error("❌ Cliente Supabase não inicializado")
                 return None
             
-            # Busca dados de liquidez da tabela liquidity com estrutura real
+            # Busca apenas o liquidity_score na tabela liquidity
             response = self.client.table('liquidity').select(
                 'liquidity_score'
             ).eq('item_key', market_hash_name).execute()
             
             if not response.data:
-                logger.debug(f"Sem dados de liquidez para {market_hash_name}")
+                logger.debug(f"Sem score de liquidez para {market_hash_name}")
                 return None
             
-            item = response.data[0]
+            liquidity_score = response.data[0].get('liquidity_score')
+            if liquidity_score is not None:
+                return float(liquidity_score)
             
-            # Busca dados adicionais da tabela market_data para complementar
-            market_response = self.client.table('market_data').select(
-                'qty_whitemarket, qty_csfloat, fetched_at'
-            ).eq('item_key', market_hash_name).execute()
-            
-            market_data = market_response.data[0] if market_response.data else {}
-            
-            return {
-                'liquidity_score': item.get('liquidity_score', 0.0),
-                'qty_whitemarket': market_data.get('qty_whitemarket', 0),
-                'qty_csfloat': market_data.get('qty_csfloat', 0),
-                'fetched_at': market_data.get('fetched_at')
-            }
+            return None
             
         except Exception as e:
-            logger.error(f"❌ Erro ao buscar dados de liquidez: {e}")
+            logger.error(f"❌ Erro ao buscar score de liquidez: {e}")
             return None
     
     async def log_opportunity(self, item: Dict, marketplace: str, profit_potential: float):
@@ -162,43 +137,6 @@ class SupabaseClient:
                 
         except Exception as e:
             logger.error(f"❌ Erro ao registrar oportunidade: {e}")
-    
-    async def get_marketplace_stats(self, marketplace: str) -> Optional[Dict[str, Any]]:
-        """
-        Obtém estatísticas de um marketplace da tabela market_data.
-        
-        Args:
-            marketplace: Nome do marketplace
-            
-        Returns:
-            Dict com estatísticas ou None se não encontrado
-        """
-        try:
-            if not self.client:
-                logger.error("❌ Cliente Supabase não inicializado")
-                return None
-            
-            # Busca estatísticas do marketplace na tabela market_data com estrutura real
-            price_column = f"price_{marketplace}"
-            
-            response = self.client.table('market_data').select(
-                f'count, avg({price_column}), min({price_column}), max({price_column})'
-            ).not_.is_(price_column, 'null').execute()
-            
-            if not response.data:
-                return None
-            
-            stats = response.data[0]
-            return {
-                'total_items': stats.get('count', 0),
-                'avg_price': stats.get('avg', 0.0),
-                'min_price': stats.get('min', 0.0),
-                'max_price': stats.get('max', 0.0)
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao buscar estatísticas: {e}")
-            return None
     
     def is_connected(self) -> bool:
         """Verifica se o cliente está conectado."""

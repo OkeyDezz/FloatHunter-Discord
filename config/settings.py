@@ -30,6 +30,9 @@ class Settings:
     MIN_PRICE: float = float(os.getenv('MIN_PRICE', '1.0'))
     MAX_PRICE: float = float(os.getenv('MAX_PRICE', '1000.0'))
     
+    # Fator de conversão coin para dólar (CSGOEmpire)
+    COIN_TO_USD_FACTOR: float = float(os.getenv('COIN_TO_USD_FACTOR', '0.614'))
+    
     # Configurações de scan
     SCAN_INTERVAL_SECONDS: int = int(os.getenv('SCAN_INTERVAL_SECONDS', '30'))
     WEBSOCKET_RECONNECT_DELAY: int = int(os.getenv('WEBSOCKET_RECONNECT_DELAY', '5'))

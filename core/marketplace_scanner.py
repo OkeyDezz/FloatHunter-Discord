@@ -115,24 +115,33 @@ class MarketplaceScanner:
                     # Já autenticado - emite eventos necessários
                     logger.info("✅ Usuário já autenticado, configurando filtros...")
                     
-                    await self.sio.emit('filters', {"enabled": False}, namespace='/trade')
-                    logger.info("📤 Filtros enviados: enabled=False")
-                    
-                    await self.sio.emit('allowedEvents', {
-                        'events': ['new_item','updated_item','auction_update','deleted_item','trade_status','timesync']
+                    # Configura filtros específicos para LEILÕES (não mercado todo)
+                    await self.sio.emit('filters', {
+                        "enabled": True,
+                        "price_min": self.settings.MIN_PRICE,
+                        "price_max": self.settings.MAX_PRICE,
+                        "type": "auction"  # Filtra apenas leilões
                     }, namespace='/trade')
-                    logger.info("📤 Eventos permitidos configurados")
+                    logger.info("📤 Filtros de leilão enviados")
                     
-                    await self.sio.emit('subscribe', ['trading', 'auctions'], namespace='/trade')
-                    logger.info("📤 Inscrição em trading/auctions enviada")
+                    # Configura eventos permitidos (foco em leilões)
+                    await self.sio.emit('allowedEvents', {
+                        'events': ['new_item', 'updated_item', 'auction_update', 'auction_end', 'deleted_item']
+                    }, namespace='/trade')
+                    logger.info("📤 Eventos de leilão configurados")
                     
+                    # Inscreve apenas no canal de leilões
+                    await self.sio.emit('subscribe', {'room': 'auctions'}, namespace='/trade')
+                    logger.info("📤 Inscrição em leilões enviada")
+                    
+                    # Sincronização de tempo
                     await self.sio.emit('timesync', namespace='/trade')
                     logger.info("📤 Timesync solicitado")
                     
                     self.authenticated = True
                     self.is_connected = True
                     self._last_data_received = time.time()
-                    logger.info("✅ Autenticado em /trade e filtros enviados")
+                    logger.info("✅ Autenticado em /trade e filtros de LEILÃO configurados")
                 else:
                     # Não autenticado - apenas log, a autenticação será feita pelo método _authenticate_websocket
                     logger.info("🆔 Usuário não autenticado no init - aguardando autenticação manual...")
@@ -167,6 +176,13 @@ class MarketplaceScanner:
             """Atualização de leilão."""
             logger.debug(f"🏷️ Atualização de leilão: {data}")
             self._update_last_data_received()
+        
+        @self.sio.on('auction_end', namespace='/trade')
+        async def on_auction_end(data):
+            """Fim de leilão."""
+            logger.info(f"🏁 Leilão finalizado: {data}")
+            self._update_last_data_received()
+            # Não processa fim de leilão como oportunidade
         
         @self.sio.on('timesync', namespace='/trade')
         async def on_timesync(data):
@@ -211,7 +227,7 @@ class MarketplaceScanner:
                     return
                 
                 # Ignora eventos que já temos handlers específicos
-                if event_name in ['identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'timesync', 'trade_status', 'error', 'connect_error', 'disconnect']:
+                if event_name in ['identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'auction_end', 'timesync', 'trade_status', 'error', 'connect_error', 'disconnect']:
                     return
                 
                 # Verifica se é uma lista ou dicionário
@@ -588,11 +604,16 @@ class MarketplaceScanner:
                 self.reconnect_attempts += 1
                 return False
             
-            # Autentica no WebSocket
-            if not await self._authenticate_websocket():
-                logger.error("❌ Falha na autenticação WebSocket")
-                self.reconnect_attempts += 1
-                return False
+            # Aguarda um pouco para o evento init chegar
+            await asyncio.sleep(3)
+            
+            # Se não foi autenticado pelo evento init, tenta autenticação manual
+            if not self.authenticated:
+                logger.info("🔄 Evento init não autenticou, tentando autenticação manual...")
+                if not await self._authenticate_websocket():
+                    logger.error("❌ Falha na autenticação WebSocket")
+                    self.reconnect_attempts += 1
+                    return False
             
             # Reset de tentativas se conectou com sucesso
             self.reconnect_attempts = 0

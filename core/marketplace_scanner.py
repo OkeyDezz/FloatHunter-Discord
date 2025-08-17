@@ -115,22 +115,21 @@ class MarketplaceScanner:
                     # Já autenticado - emite eventos necessários
                     logger.info("✅ Usuário já autenticado, configurando filtros...")
                     
-                    # Configura filtros específicos para LEILÕES (não mercado todo)
+                    # Configura filtros seguindo exatamente a documentação
                     await self.sio.emit('filters', {
                         "enabled": True,
                         "price_min": self.settings.MIN_PRICE,
-                        "price_max": self.settings.MAX_PRICE,
-                        "type": "auction"  # Filtra apenas leilões
+                        "price_max": self.settings.MAX_PRICE
                     }, namespace='/trade')
-                    logger.info("📤 Filtros de leilão enviados")
+                    logger.info("📤 Filtros básicos enviados")
                     
-                    # Configura eventos permitidos (foco em leilões)
+                    # Configura eventos permitidos (todos os eventos de leilão)
                     await self.sio.emit('allowedEvents', {
-                        'events': ['new_item', 'updated_item', 'auction_update', 'auction_end', 'deleted_item']
+                        'events': ['new_item', 'updated_item', 'auction_update', 'auction_end', 'deleted_item', 'timesync']
                     }, namespace='/trade')
-                    logger.info("📤 Eventos de leilão configurados")
+                    logger.info("📤 Eventos permitidos configurados")
                     
-                    # Inscreve apenas no canal de leilões
+                    # Inscreve nos canais seguindo a documentação
                     await self.sio.emit('subscribe', {'room': 'auctions'}, namespace='/trade')
                     logger.info("📤 Inscrição em leilões enviada")
                     
@@ -138,10 +137,16 @@ class MarketplaceScanner:
                     await self.sio.emit('timesync', namespace='/trade')
                     logger.info("📤 Timesync solicitado")
                     
+                    # Aguarda um pouco e envia heartbeat
+                    await asyncio.sleep(1)
+                    await self.sio.emit('ping', namespace='/trade')
+                    logger.info("📤 Ping enviado")
+                    
                     self.authenticated = True
                     self.is_connected = True
                     self._last_data_received = time.time()
-                    logger.info("✅ Autenticado em /trade e filtros de LEILÃO configurados")
+                    logger.info("✅ Autenticado em /trade e filtros configurados")
+                    logger.info("🎯 Bot pronto para receber itens de leilão!")
                 else:
                     # Não autenticado - executa autenticação manual IMEDIATAMENTE
                     logger.info("🆔 Usuário não autenticado no init - executando autenticação manual...")
@@ -157,17 +162,25 @@ class MarketplaceScanner:
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
         
+        @self.sio.on('ping', namespace='/trade')
+        async def on_ping(data):
+            """Resposta do ping."""
+            logger.info(f"🏓 Pong recebido: {data}")
+            self._update_last_data_received()
+        
         @self.sio.on('new_item', namespace='/trade')
         async def on_new_item(data):
             """Novo item disponível."""
-            logger.info(f"🆕 Novo item recebido: {data.get('market_name', 'Unknown')}")
+            logger.info(f"🆕 NOVO ITEM RECEBIDO: {data.get('market_name', 'Unknown')}")
+            logger.info(f"📊 Dados completos: {data}")
             self._update_last_data_received()
             await self._process_item(data, 'new_item')
         
         @self.sio.on('updated_item', namespace='/trade')
         async def on_updated_item(data):
             """Item atualizado."""
-            logger.debug(f"🔄 Item atualizado: {data.get('market_name', 'Unknown')}")
+            logger.info(f"🔄 ITEM ATUALIZADO: {data.get('market_name', 'Unknown')}")
+            logger.info(f"📊 Dados completos: {data}")
             self._update_last_data_received()
             await self._process_item(data, 'updated_item')
         
@@ -251,7 +264,7 @@ class MarketplaceScanner:
                     return
                 
                 # Ignora eventos que já temos handlers específicos
-                if event_name in ['identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'auction_end', 'timesync', 'trade_status', 'error']:
+                if event_name in ['identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'auction_end', 'timesync', 'trade_status', 'error', 'ping']:
                     return
                 
                 # Verifica se é uma lista ou dicionário

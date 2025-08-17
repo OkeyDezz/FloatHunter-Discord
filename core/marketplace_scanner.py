@@ -12,6 +12,7 @@ from config.settings import Settings
 from filters.profit_filter import ProfitFilter
 from filters.liquidity_filter import LiquidityFilter
 from utils.supabase_client import SupabaseClient
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class MarketplaceScanner:
         self.settings = Settings()
         self.sio = socketio.AsyncClient()
         self.is_connected = False
-        self.authenticated = False  # Adicionando atributo faltante
+        self.authenticated = False
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
         
@@ -33,6 +34,10 @@ class MarketplaceScanner:
         self.socket_token = None
         self.socket_signature = None
         self.user_model = None
+        
+        # Timestamps para monitoramento
+        self._last_data_received = time.time()
+        self._connection_start_time = None
         
         # Filtros
         self.profit_filter = ProfitFilter(
@@ -57,61 +62,81 @@ class MarketplaceScanner:
         async def connect():
             """Evento de conexão."""
             logger.info("🔌 Conectado ao WebSocket do CSGOEmpire")
+            self._connection_start_time = time.time()
         
         @self.sio.event
         async def disconnect():
             """Evento de desconexão."""
             logger.info("🔌 Desconectado do WebSocket do CSGOEmpire")
             self.is_connected = False
+            self.authenticated = False
         
         @self.sio.event
         async def connect_error(data):
             """Erro de conexão."""
             logger.error(f"❌ Erro de conexão WebSocket: {data}")
             self.is_connected = False
+            self.authenticated = False
         
         @self.sio.event(namespace='/trade')
         async def connect():
             """Conectado ao namespace /trade."""
             logger.info("🔌 Conectado ao namespace /trade")
+            self._connection_start_time = time.time()
         
         @self.sio.event(namespace='/trade')
         async def disconnect():
             """Desconectado do namespace /trade."""
             logger.info("🔌 Desconectado do namespace /trade")
             self.is_connected = False
+            self.authenticated = False
         
         @self.sio.event(namespace='/trade')
         async def authenticated(data):
             """Evento de autenticação bem-sucedida."""
-            logger.info("✅ WebSocket autenticado com sucesso")
+            logger.info(f"✅ WebSocket autenticado com sucesso: {data}")
             self.authenticated = True
             self.is_connected = True
+            self._last_data_received = time.time()
         
         @self.sio.event(namespace='/trade')
         async def new_item(data):
             """Novo item disponível."""
+            logger.info(f"🆕 Novo item recebido: {data.get('name', 'Unknown')}")
+            self._update_last_data_received()
             await self._process_item(data, 'new_item')
         
         @self.sio.event(namespace='/trade')
         async def updated_item(data):
             """Item atualizado."""
+            logger.debug(f"🔄 Item atualizado: {data.get('name', 'Unknown')}")
+            self._update_last_data_received()
             await self._process_item(data, 'updated_item')
         
         @self.sio.event(namespace='/trade')
         async def removed_item(data):
             """Item removido."""
+            logger.debug(f"🗑️ Item removido: {data.get('name', 'Unknown')}")
+            self._update_last_data_received()
             await self._process_item(data, 'removed_item')
         
         @self.sio.event(namespace='/trade')
         async def timesync(data):
             """Sincronização de tempo."""
             logger.debug("⏰ Timesync recebido")
+            self._update_last_data_received()
         
         @self.sio.event(namespace='/trade')
         async def error(data):
             """Erro do servidor."""
             logger.error(f"❌ Erro do servidor WebSocket: {data}")
+        
+        # Handler genérico para qualquer evento
+        @self.sio.event(namespace='/trade')
+        async def message(data):
+            """Mensagem genérica do servidor."""
+            logger.debug(f"📨 Mensagem recebida: {type(data).__name__}")
+            self._update_last_data_received()
     
     async def _identify_and_configure(self):
         """Identifica e configura filtros no WebSocket."""
@@ -263,6 +288,47 @@ class MarketplaceScanner:
             logger.error(f"❌ Erro ao verificar filtros: {e}")
             return False
     
+    async def _check_connection_health(self) -> bool:
+        """Verifica se a conexão WebSocket está realmente ativa."""
+        try:
+            # Verifica se o socket está conectado
+            if not self.sio.connected:
+                logger.debug("❌ Socket.IO não está conectado")
+                return False
+            
+            # Verifica se está autenticado
+            if not self.authenticated:
+                logger.debug("❌ WebSocket não está autenticado")
+                return False
+            
+            # Verifica se recebeu dados recentemente
+            if hasattr(self, '_last_data_received'):
+                time_since_data = time.time() - self._last_data_received
+                if time_since_data > 300:  # 5 minutos sem dados
+                    logger.warning(f"⚠️ Sem dados recebidos há {time_since_data:.0f}s")
+                    return False
+            
+            logger.debug("✅ Conexão WebSocket está saudável")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao verificar saúde da conexão: {e}")
+            return False
+    
+    async def _send_heartbeat(self):
+        """Envia heartbeat para manter conexão ativa."""
+        try:
+            if self.sio.connected and self.authenticated:
+                # Envia evento de ping (se suportado pelo servidor)
+                await self.sio.emit('ping', namespace='/trade')
+                logger.debug("💓 Heartbeat enviado")
+        except Exception as e:
+            logger.debug(f"⚠️ Erro ao enviar heartbeat: {e}")
+    
+    def _update_last_data_received(self):
+        """Atualiza timestamp do último dado recebido."""
+        self._last_data_received = time.time()
+    
     async def _connect_websocket(self) -> bool:
         """Conecta ao WebSocket do CSGOEmpire."""
         try:
@@ -288,6 +354,8 @@ class MarketplaceScanner:
             # Query string com uid e token (mesmo formato do bot principal)
             qs = f"uid={self.user_id}&token={self.socket_token}"
             
+            logger.info(f"🔌 Conectando ao WebSocket: trade.csgoempire.com/?{qs}")
+            
             # Conecta usando a mesma URL e namespace do bot principal
             await self.sio.connect(
                 f"https://trade.csgoempire.com/?{qs}",
@@ -299,10 +367,14 @@ class MarketplaceScanner:
             
             logger.info("🔌 WebSocket conectado ao namespace /trade")
             
-            # Aguarda autenticação
-            for _ in range(30):  # 30 segundos timeout
+            # Aguarda autenticação com timeout maior
+            logger.info("⏳ Aguardando autenticação...")
+            for i in range(60):  # 60 segundos timeout
                 if self.authenticated:
+                    logger.info("✅ WebSocket autenticado com sucesso")
                     break
+                if i % 10 == 0:  # Log a cada 10 segundos
+                    logger.info(f"⏳ Aguardando autenticação... ({i}s)")
                 await asyncio.sleep(1)
             
             if self.authenticated:
@@ -464,16 +536,24 @@ class MarketplaceScanner:
                     if await self.connect():
                         logger.info("✅ Scanner conectado, aguardando oportunidades...")
                         
-                        # Aguarda enquanto estiver conectado
-                        while self.is_connected and self.authenticated:
+                        # Loop de monitoramento com verificação de saúde
+                        while True:
+                            # Verifica saúde da conexão
+                            if not await self._check_connection_health():
+                                logger.warning("⚠️ Conexão não está saudável, tentando reconectar...")
+                                break
+                            
+                            # Envia heartbeat a cada 30 segundos
+                            await self._send_heartbeat()
+                            
+                            # Aguarda próximo ciclo
                             await asyncio.sleep(30)
                             
-                            # Verifica se ainda está conectado
-                            if not self.sio.connected:
-                                logger.warning("⚠️ WebSocket desconectado, tentando reconectar...")
-                                self.is_connected = False
-                                self.authenticated = False
-                                break
+                            # Log de status a cada 2 minutos
+                            if hasattr(self, '_connection_start_time') and self._connection_start_time:
+                                uptime = time.time() - self._connection_start_time
+                                if int(uptime) % 120 == 0:  # A cada 2 minutos
+                                    logger.info(f"📊 Status: Conectado há {int(uptime)}s, autenticado: {self.authenticated}")
                         
                         # Se chegou aqui, perdeu conexão
                         logger.warning("⚠️ Conexão perdida, aguardando antes de reconectar...")

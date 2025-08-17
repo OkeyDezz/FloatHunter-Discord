@@ -1,98 +1,164 @@
-# 🚀 Deploy no Railway - Opportunity Bot
+# 🚀 Deploy no Railway
 
-## ✅ Problemas Resolvidos
+## 📋 Pré-requisitos
 
-1. **Erro de Build do aiohttp**: Resolvido usando Python 3.11 e versões estáveis
-2. **Variáveis do Supabase**: Adicionadas todas as configurações necessárias
-3. **Health Check**: Implementado servidor de health check para o Railway
+1. **Conta no Railway** ([railway.app](https://railway.app))
+2. **Repositório GitHub** com o código do bot
+3. **Variáveis de ambiente** configuradas
 
-## 🔧 Configuração no Railway
+## 🔧 Configuração
 
-### Passo 1: Conectar Repositório
+### 1. Conectar Repositório
+- Acesse [railway.app](https://railway.app)
+- Clique em "New Project"
+- Selecione "Deploy from GitHub repo"
+- Escolha o repositório `FloatHunter-Discord`
 
-1. Acesse [Railway.app](https://railway.app)
-2. Faça login com sua conta GitHub
-3. Clique em "New Project"
-4. Selecione "Deploy from GitHub repo"
-5. Escolha: `OkeyDezz/FloatHunter-Discord`
-
-### Passo 2: Configurar Variáveis de Ambiente
-
-No Railway, adicione estas variáveis:
+### 2. Configurar Variáveis de Ambiente
+No Railway, vá em **Variables** e adicione:
 
 ```env
-# CSGOEmpire
+# OBRIGATÓRIAS
 CSGOEMPIRE_API_KEY=sua_api_key_aqui
-
-# Discord
-DISCORD_TOKEN=seu_token_do_bot_aqui
+DISCORD_TOKEN=seu_token_aqui
 CSGOEMPIRE_CHANNEL_ID=123456789
-
-# Supabase (OBRIGATÓRIO)
 SUPABASE_URL=https://seu-projeto.supabase.co
 SUPABASE_ANON_KEY=sua_chave_anonima_aqui
-SUPABASE_SERVICE_ROLE_KEY=sua_chave_service_role_aqui
 
-# Filtros
+# OPCIONAIS (valores padrão)
+COIN_TO_USD_FACTOR=0.614
 MIN_PROFIT_PERCENTAGE=5.0
-MIN_LIQUIDITY_SCORE=0.7
+MIN_LIQUIDITY_SCORE=70.0
 MIN_PRICE=1.0
 MAX_PRICE=1000.0
-
-# Configurações
-SCAN_INTERVAL_SECONDS=30
-LOG_LEVEL=INFO
+PORT=8000
 ```
 
-### Passo 3: Deploy
+### 3. Configurar Deploy
 
-1. O Railway detectará automaticamente os arquivos de configuração
-2. Clique em "Deploy"
-3. Aguarde o build (deve funcionar agora!)
+#### **Opção 1: Apenas Health Server (Recomendado para primeiro deploy)**
+- **Start Command**: `python3 start_health.py`
+- **Health Check Path**: `/health`
+- **Port**: `8000`
+
+#### **Opção 2: Bot Completo com Health Server**
+- **Start Command**: `python3 start_full_bot.py`
+- **Health Check Path**: `/health`
+- **Port**: `8000`
+
+#### **Opção 3: Bot Original**
+- **Start Command**: `python3 main.py`
+- **Health Check Path**: `/health`
+- **Port**: `8000`
+
+## 🚀 Deploy
+
+### Primeiro Deploy (Recomendado)
+1. Use **Opção 1** (`start_health.py`)
+2. Deploy e aguarde funcionar
+3. Verifique logs para confirmar health server rodando
+
+### Deploy Completo
+1. Após health server funcionar, mude para **Opção 2** (`start_full_bot.py`)
+2. Redeploy
+3. Verifique logs para confirmar bot funcionando
+
+## 🔍 Verificação
+
+### 1. Health Check
+```bash
+# Teste o endpoint de health
+curl "https://seu-projeto.railway.app/health"
+```
+
+**Resposta esperada:**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2024-01-01T00:00:00",
+  "uptime_seconds": 30,
+  "service": "opportunity-bot",
+  "version": "1.0.0",
+  "port": 8000
+}
+```
+
+### 2. Status Detalhado
+```bash
+# Teste o endpoint de status
+curl "https://seu-projeto.railway.app/status"
+```
+
+### 3. Logs
+No Railway, vá em **Deployments** → **View Logs** e verifique:
+- ✅ "Servidor de health check iniciado na porta 8000"
+- ✅ "Health check disponível em: /health"
+- ✅ Sem erros críticos
+
+## 🚨 Troubleshooting
+
+### Service Unavailable
+Se ainda ocorrer "service unavailable":
+
+1. **Verifique logs** no Railway
+2. **Confirme variáveis** de ambiente
+3. **Teste localmente** primeiro:
+   ```bash
+   python3 start_health.py
+   curl http://localhost:8000/health
+   ```
+
+### Health Check Falha
+1. **Verifique porta**: Confirme `PORT=8000`
+2. **Verifique logs**: Procure por erros de inicialização
+3. **Teste endpoints**: Use curl para testar localmente
+
+### Bot Não Inicia
+1. **Use Opção 1** primeiro (apenas health server)
+2. **Verifique credenciais**: Supabase, Discord, CSGOEmpire
+3. **Teste conexões** uma por vez
 
 ## 📊 Monitoramento
 
-### Health Check
-- **URL**: `https://seu-projeto.railway.app/health`
-- **Status**: Retorna `{"status": "healthy"}` se funcionando
+### Logs Importantes
+- 🚀 "Servidor de health check iniciado"
+- ✅ "Health server está funcionando!"
+- 🤖 "Iniciando bot completo..."
+- 🔍 "Conexão com Supabase OK"
+- 🤖 "Discord inicializado com sucesso"
 
-### Logs
-- Acesse a aba "Deployments" no Railway
-- Clique no deployment mais recente
-- Verifique os logs para debug
-
-## 🆘 Solução de Problemas
-
-### Build Falha
-- Verifique se todas as variáveis de ambiente estão configuradas
-- Confirme se o repositório está sincronizado
-
-### Bot Não Conecta
-- Verifique se o token do Discord está correto
-- Confirme se o bot foi convidado para o servidor
-
-### Erro de Database
-- Verifique as credenciais do Supabase
-- Confirme se as tabelas existem na database
+### Métricas
+- **Uptime**: Verificado via `/health`
+- **Status**: Detalhado via `/status`
+- **Logs**: Disponíveis no Railway
 
 ## 🔄 Atualizações
 
-Para atualizar o bot:
-1. Faça alterações no código
-2. Commit e push para o GitHub
-3. O Railway fará deploy automático
+### Deploy Automático
+- Configure **GitHub Actions** para deploy automático
+- Ou use **Railway CLI** para deploy manual
 
-## 📈 Recursos Utilizados
+### Rollback
+- Railway mantém histórico de deploys
+- Clique em deploy anterior para rollback
 
-- **RAM**: ~200-400MB
-- **CPU**: <5%
-- **Storage**: <1GB
-- **Network**: Baixo
+## ✅ Checklist de Deploy
 
-## 🎯 Próximos Passos
+- [ ] Repositório conectado ao Railway
+- [ ] Variáveis de ambiente configuradas
+- [ ] Health server funcionando (`/health` responde)
+- [ ] Logs sem erros críticos
+- [ ] Bot funcionando (se usando Opção 2 ou 3)
+- [ ] Discord recebendo mensagens
+- [ ] CSGOEmpire conectando
+- [ ] Supabase funcionando
 
-1. ✅ Deploy no Railway
-2. ✅ Configurar Discord
-3. ✅ Testar funcionalidade
-4. ✅ Monitorar performance
-5. ✅ Expandir para outros marketplaces
+## 🆘 Suporte
+
+Se problemas persistirem:
+
+1. **Verifique logs** no Railway
+2. **Teste localmente** primeiro
+3. **Confirme credenciais** de todos os serviços
+4. **Use Opção 1** para isolar problemas
+5. **Verifique estrutura** das tabelas Supabase

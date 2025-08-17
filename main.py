@@ -97,6 +97,14 @@ class OpportunityBot:
     async def run(self):
         """Executa o bot."""
         try:
+            # Inicia servidor de health check IMEDIATAMENTE
+            logger.info("🚀 Iniciando servidor de health check...")
+            health_server = HealthServer()
+            health_task = asyncio.create_task(health_server.start())
+            
+            # Aguarda um pouco para o health server inicializar
+            await asyncio.sleep(2)
+            
             if not await self.initialize():
                 logger.error("❌ Falha na inicialização, encerrando...")
                 return
@@ -106,10 +114,6 @@ class OpportunityBot:
             
             # Inicia scanner em background
             scanner_task = asyncio.create_task(self.scanner.run_forever())
-            
-            # Inicia servidor de health check em background
-            health_server = HealthServer()
-            health_task = asyncio.create_task(health_server.start())
             
             # Loop principal
             while self.running:

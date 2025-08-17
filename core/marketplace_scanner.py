@@ -16,18 +16,27 @@ from utils.supabase_client import SupabaseClient
 logger = logging.getLogger(__name__)
 
 class MarketplaceScanner:
-    """Scanner de marketplace usando WebSocket."""
+    """
+    Scanner de marketplace usando WebSocket para o Opportunity Bot.
+    """
     
     def __init__(self):
         self.settings = Settings()
         self.sio = socketio.AsyncClient()
         self.is_connected = False
+        self.authenticated = False  # Adicionando atributo faltante
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
         
+        # Dados de autenticação
+        self.user_id = None
+        self.socket_token = None
+        self.socket_signature = None
+        self.user_model = None
+        
         # Filtros
         self.profit_filter = ProfitFilter(
-            self.settings.MIN_PROFIT_PERCENTAGE, 
+            self.settings.MIN_PROFIT_PERCENTAGE,
             self.settings.COIN_TO_USD_FACTOR
         )
         self.liquidity_filter = LiquidityFilter(self.settings.MIN_LIQUIDITY_SCORE)
@@ -35,15 +44,10 @@ class MarketplaceScanner:
         # Supabase client
         self.supabase = SupabaseClient()
         
-        # Callback para oportunidades encontradas
+        # Callback para oportunidades
         self.opportunity_callback: Optional[Callable] = None
         
-        # Dados de autenticação
-        self.user_id = None
-        self.socket_token = None
-        self.socket_signature = None
-        
-        # Setup dos eventos do WebSocket
+        # Configura eventos
         self._setup_socket_events()
     
     def _setup_socket_events(self):
@@ -240,31 +244,33 @@ class MarketplaceScanner:
             return None
     
     async def _check_filters(self, item: Dict) -> bool:
-        """Verifica se o item passa pelos filtros."""
+        """Verifica se o item passa nos filtros configurados."""
         try:
-            # Filtro de preço
-            if 'price' in item:
-                price = float(item['price'])
-                if price < self.settings.MIN_PRICE or price > self.settings.MAX_PRICE:
-                    return False
-            
             # Filtro de lucro
             if not await self.profit_filter.check(item):
+                logger.debug(f"Item {item.get('name')} rejeitado pelo filtro de lucro")
                 return False
             
             # Filtro de liquidez
             if not await self.liquidity_filter.check(item):
+                logger.debug(f"Item {item.get('name')} rejeitado pelo filtro de liquidez")
                 return False
             
+            logger.debug(f"Item {item.get('name')} passou em todos os filtros")
             return True
             
         except Exception as e:
-            logger.error(f"Erro ao verificar filtros: {e}")
+            logger.error(f"❌ Erro ao verificar filtros: {e}")
             return False
     
     async def _connect_websocket(self) -> bool:
         """Conecta ao WebSocket do CSGOEmpire."""
         try:
+            # Verifica se já está conectado
+            if self.sio.connected:
+                logger.info("✅ WebSocket já está conectado")
+                return True
+            
             if not all([self.user_id, self.socket_token, self.socket_signature]):
                 logger.error("❌ Dados de autenticação incompletos")
                 return False
@@ -313,23 +319,45 @@ class MarketplaceScanner:
     async def connect(self) -> bool:
         """Conecta ao WebSocket do CSGOEmpire."""
         try:
-            # Testa conexão com Supabase primeiro
+            # Verifica se já está conectado
+            if self.is_connected and self.authenticated:
+                logger.info("✅ Já conectado ao WebSocket")
+                return True
+            
+            # Verifica se excedeu tentativas de reconexão
+            if self.reconnect_attempts >= self.max_reconnect_attempts:
+                logger.error(f"❌ Máximo de tentativas de reconexão atingido ({self.max_reconnect_attempts})")
+                return False
+            
+            logger.info("🔄 Tentando conectar ao WebSocket...")
+            
+            # Testa conexão com Supabase
             logger.info("🔍 Testando conexão com Supabase...")
             if not await self.supabase.test_connection():
                 logger.error("❌ Falha na conexão com Supabase")
                 return False
-            
             logger.info("✅ Conexão com Supabase OK")
             
-            # Obtém metadata para autenticação
+            # Obtém metadata
             if not await self._get_socket_metadata():
+                logger.error("❌ Falha ao obter metadata")
+                self.reconnect_attempts += 1
                 return False
             
             # Conecta ao WebSocket
-            return await self._connect_websocket()
+            if not await self._connect_websocket():
+                logger.error("❌ Falha ao conectar WebSocket")
+                self.reconnect_attempts += 1
+                return False
+            
+            # Reset de tentativas se conectou com sucesso
+            self.reconnect_attempts = 0
+            logger.info("✅ Conectado com sucesso ao WebSocket")
+            return True
             
         except Exception as e:
             logger.error(f"❌ Erro ao conectar WebSocket: {e}")
+            self.reconnect_attempts += 1
             return False
     
     async def _get_socket_metadata(self) -> bool:
@@ -414,28 +442,60 @@ class MarketplaceScanner:
     async def disconnect(self):
         """Desconecta do WebSocket."""
         try:
-            if self.is_connected:
+            if self.sio.connected:
                 await self.sio.disconnect()
-                logger.info("WebSocket desconectado")
+                logger.info("🔌 WebSocket desconectado")
+            
+            self.is_connected = False
+            self.authenticated = False
+            self.reconnect_attempts = 0
+            
         except Exception as e:
-            logger.error(f"Erro ao desconectar WebSocket: {e}")
+            logger.error(f"❌ Erro ao desconectar: {e}")
     
     async def run_forever(self):
         """Executa o scanner indefinidamente."""
-        while True:
-            try:
-                if not self.is_connected:
-                    logger.info("🔄 Tentando conectar ao WebSocket...")
+        try:
+            logger.info("🚀 Iniciando scanner de marketplace...")
+            
+            while True:
+                try:
+                    # Tenta conectar
                     if await self.connect():
-                        logger.info("✅ Conectado ao WebSocket")
+                        logger.info("✅ Scanner conectado, aguardando oportunidades...")
+                        
+                        # Aguarda enquanto estiver conectado
+                        while self.is_connected and self.authenticated:
+                            await asyncio.sleep(30)
+                            
+                            # Verifica se ainda está conectado
+                            if not self.sio.connected:
+                                logger.warning("⚠️ WebSocket desconectado, tentando reconectar...")
+                                self.is_connected = False
+                                self.authenticated = False
+                                break
+                        
+                        # Se chegou aqui, perdeu conexão
+                        logger.warning("⚠️ Conexão perdida, aguardando antes de reconectar...")
+                        await asyncio.sleep(10)
+                        
                     else:
-                        logger.error("❌ Falha ao conectar")
-                        await asyncio.sleep(self.settings.WEBSOCKET_RECONNECT_DELAY)
-                        continue
-                
-                # Mantém conexão ativa
-                await asyncio.sleep(1)
-                
-            except Exception as e:
-                logger.error(f"❌ Erro no loop principal: {e}")
-                await asyncio.sleep(self.settings.WEBSOCKET_RECONNECT_DELAY)
+                        # Falha na conexão
+                        if self.reconnect_attempts >= self.max_reconnect_attempts:
+                            logger.error("❌ Máximo de tentativas atingido, aguardando 5 minutos...")
+                            await asyncio.sleep(300)  # 5 minutos
+                            self.reconnect_attempts = 0  # Reset
+                        else:
+                            logger.warning(f"⚠️ Tentativa {self.reconnect_attempts + 1}/{self.max_reconnect_attempts} falhou")
+                            await asyncio.sleep(30)  # 30 segundos
+                            
+                except Exception as e:
+                    logger.error(f"❌ Erro no loop principal: {e}")
+                    await asyncio.sleep(30)
+                    
+        except asyncio.CancelledError:
+            logger.info("🛑 Scanner cancelado")
+        except Exception as e:
+            logger.error(f"❌ Erro fatal no scanner: {e}")
+        finally:
+            await self.disconnect()

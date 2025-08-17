@@ -83,6 +83,8 @@ class MarketplaceScanner:
             """Conectado ao namespace /trade."""
             logger.info("🔌 Conectado ao namespace /trade")
             self._connection_start_time = time.time()
+            self.is_connected = True
+            logger.info("✅ Status atualizado: is_connected = True")
         
         @self.sio.event(namespace='/trade')
         async def disconnect():
@@ -90,6 +92,7 @@ class MarketplaceScanner:
             logger.info("🔌 Desconectado do namespace /trade")
             self.is_connected = False
             self.authenticated = False
+            logger.info("✅ Status atualizado: is_connected = False, authenticated = False")
         
         @self.sio.on('identify', namespace='/trade')
         async def on_identify_response(data):
@@ -229,8 +232,16 @@ class MarketplaceScanner:
         async def catch_all(event_name, data):
             """Captura todos os eventos para debug."""
             try:
+                # Log especial para o evento init
+                if event_name == 'init':
+                    logger.info(f"🎯 EVENTO INIT CAPTURADO: {event_name}")
+                    logger.info(f"📡 Dados do init: {data}")
+                    # Chama o handler específico do init
+                    await on_init(data)
+                    return
+                
                 # Ignora eventos que já temos handlers específicos
-                if event_name in ['init', 'identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'timesync', 'trade_status', 'error', 'connect_error', 'disconnect']:
+                if event_name in ['identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'timesync', 'trade_status', 'error', 'connect_error', 'disconnect']:
                     return
                 
                 # Verifica se é uma lista ou dicionário
@@ -454,10 +465,6 @@ class MarketplaceScanner:
                 logger.error(f"  - socket_signature: {self.socket_signature[:20]}..." if self.socket_signature else "None")
                 return False
             
-            # Configura handlers
-            logger.info("🔧 Configurando handlers de eventos...")
-            self._setup_socket_events()
-            
             # Headers usados pelo bot principal
             headers = {
                 'User-Agent': 'Mozilla/5.0',
@@ -480,11 +487,20 @@ class MarketplaceScanner:
             )
             
             logger.info("🔌 WebSocket conectado ao namespace /trade")
+            
+            # Aguarda um pouco para a conexão estabilizar
+            await asyncio.sleep(2)
+            
+            # Verifica se ainda está conectado
+            if not self.sio.connected:
+                logger.error("❌ WebSocket desconectado após conexão")
+                return False
+            
             logger.info("⏳ Aguardando evento init...")
             
             # Aguarda evento 'init' e autenticação completa
             logger.info("⏳ Aguardando evento init e autenticação...")
-            for i in range(60):  # 60 segundos timeout (aumentado para dar tempo ao identify)
+            for i in range(60):  # 60 segundos timeout
                 if self.authenticated:
                     logger.info("✅ WebSocket autenticado com sucesso via identify")
                     break
@@ -536,6 +552,10 @@ class MarketplaceScanner:
                 logger.error("❌ Falha ao obter metadata")
                 self.reconnect_attempts += 1
                 return False
+            
+            # Configura handlers ANTES de conectar (crítico!)
+            logger.info("🔧 Configurando handlers de eventos...")
+            self._setup_socket_events()
             
             # Conecta ao WebSocket
             if not await self._connect_websocket():

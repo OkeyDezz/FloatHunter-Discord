@@ -1,7 +1,7 @@
-# Dependências do Opportunity Bot - Versões compatíveis com Python 3.12
-python-socketio==5.10.0
-aiohttp==3.9.1
+# Dependências do Opportunity Bot - Versões estáveis para Python 3.11
+python-socketio==5.9.0
+aiohttp==3.8.6
 discord.py==2.3.2
 python-dotenv==1.0.0
-supabase==2.3.0
+supabase==2.0.2
 requests==2.31.0

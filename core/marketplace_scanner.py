@@ -91,51 +91,78 @@ class MarketplaceScanner:
             self.is_connected = False
             self.authenticated = False
         
-        @self.sio.event(namespace='/trade')
-        async def authenticated(data):
-            """Evento de autenticação bem-sucedida."""
-            logger.info(f"✅ WebSocket autenticado com sucesso: {data}")
-            self.authenticated = True
-            self.is_connected = True
-            self._last_data_received = time.time()
+        @self.sio.on('init', namespace='/trade')
+        async def on_init(data):
+            """Evento de inicialização (mesmo do bot principal)."""
+            logger.info(f"📡 Evento init recebido: {data}")
+            try:
+                if isinstance(data, dict) and data.get('authenticated'):
+                    # Emite eventos necessários (mesmo do bot principal)
+                    await self.sio.emit('filters', {"enabled": False}, namespace='/trade')
+                    await self.sio.emit('allowedEvents', {
+                        'events': ['new_item','updated_item','auction_update','deleted_item','trade_status','timesync']
+                    }, namespace='/trade')
+                    await self.sio.emit('subscribe', ['trading', 'auctions'], namespace='/trade')
+                    await self.sio.emit('timesync', namespace='/trade')
+                    
+                    self.authenticated = True
+                    self.is_connected = True
+                    self._last_data_received = time.time()
+                    logger.info("✅ Autenticado em /trade e filtros enviados")
+                else:
+                    logger.warning("ℹ️ init sem authenticated=true")
+            except Exception as e:
+                logger.error(f"❌ Erro no init: {e}")
         
-        @self.sio.event(namespace='/trade')
-        async def new_item(data):
+        @self.sio.on('new_item', namespace='/trade')
+        async def on_new_item(data):
             """Novo item disponível."""
             logger.info(f"🆕 Novo item recebido: {data.get('name', 'Unknown')}")
             self._update_last_data_received()
             await self._process_item(data, 'new_item')
         
-        @self.sio.event(namespace='/trade')
-        async def updated_item(data):
+        @self.sio.on('updated_item', namespace='/trade')
+        async def on_updated_item(data):
             """Item atualizado."""
             logger.debug(f"🔄 Item atualizado: {data.get('name', 'Unknown')}")
             self._update_last_data_received()
             await self._process_item(data, 'updated_item')
         
-        @self.sio.event(namespace='/trade')
-        async def removed_item(data):
+        @self.sio.on('deleted_item', namespace='/trade')
+        async def on_deleted_item(data):
             """Item removido."""
             logger.debug(f"🗑️ Item removido: {data.get('name', 'Unknown')}")
             self._update_last_data_received()
             await self._process_item(data, 'removed_item')
         
-        @self.sio.event(namespace='/trade')
-        async def timesync(data):
+        @self.sio.on('auction_update', namespace='/trade')
+        async def on_auction_update(data):
+            """Atualização de leilão."""
+            logger.debug(f"🏷️ Atualização de leilão: {data}")
+            self._update_last_data_received()
+        
+        @self.sio.on('timesync', namespace='/trade')
+        async def on_timesync(data):
             """Sincronização de tempo."""
             logger.debug("⏰ Timesync recebido")
             self._update_last_data_received()
         
-        @self.sio.event(namespace='/trade')
-        async def error(data):
+        @self.sio.on('trade_status', namespace='/trade')
+        async def on_trade_status(data):
+            """Status de trade."""
+            logger.debug(f"📊 Status de trade: {data}")
+            self._update_last_data_received()
+        
+        @self.sio.on('error', namespace='/trade')
+        async def on_error(data):
             """Erro do servidor."""
             logger.error(f"❌ Erro do servidor WebSocket: {data}")
         
-        # Handler genérico para qualquer evento
-        @self.sio.event(namespace='/trade')
-        async def message(data):
-            """Mensagem genérica do servidor."""
-            logger.debug(f"📨 Mensagem recebida: {type(data).__name__}")
+        # Handler genérico para capturar todos os eventos (mesmo do bot principal)
+        @self.sio.on('*', namespace='/trade')
+        async def catch_all(event_name, data):
+            """Captura todos os eventos para debug."""
+            logger.debug(f"📨 Evento recebido: {event_name} - {type(data).__name__}")
             self._update_last_data_received()
     
     async def _identify_and_configure(self):
@@ -367,21 +394,21 @@ class MarketplaceScanner:
             
             logger.info("🔌 WebSocket conectado ao namespace /trade")
             
-            # Aguarda autenticação com timeout maior
-            logger.info("⏳ Aguardando autenticação...")
-            for i in range(60):  # 60 segundos timeout
+            # Aguarda evento 'init' com authenticated=true (mesmo do bot principal)
+            logger.info("⏳ Aguardando evento init com authenticated=true...")
+            for i in range(30):  # 30 segundos timeout (mesmo do bot principal)
                 if self.authenticated:
-                    logger.info("✅ WebSocket autenticado com sucesso")
+                    logger.info("✅ WebSocket autenticado com sucesso via init")
                     break
-                if i % 10 == 0:  # Log a cada 10 segundos
-                    logger.info(f"⏳ Aguardando autenticação... ({i}s)")
+                if i % 5 == 0:  # Log a cada 5 segundos
+                    logger.info(f"⏳ Aguardando init... ({i}s)")
                 await asyncio.sleep(1)
             
             if self.authenticated:
                 logger.info("✅ WebSocket autenticado com sucesso")
                 return True
             else:
-                logger.error("❌ Timeout na autenticação do WebSocket")
+                logger.error("❌ Timeout aguardando evento init")
                 return False
                 
         except Exception as e:

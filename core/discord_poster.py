@@ -131,10 +131,34 @@ class DiscordPoster:
                     inline=True
                 )
             
+            if 'price_buff163' in item:
+                embed.add_field(
+                    name="🏪 Preço Buff163", 
+                    value=f"${item['price_buff163']:.2f}", 
+                    inline=True
+                )
+            
             if 'suggested_price' in item:
                 embed.add_field(
                     name="💡 Preço Sugerido", 
                     value=f"${item['suggested_price']:.2f}", 
+                    inline=True
+                )
+            
+            # Adiciona informações de liquidez
+            if 'liquidity_score' in item:
+                liquidity_score = item['liquidity_score']
+                # Define cor baseada no score de liquidez
+                if liquidity_score >= 80:
+                    liquidity_color = "🟢"  # Verde para alta liquidez
+                elif liquidity_score >= 60:
+                    liquidity_color = "🟡"  # Amarelo para média liquidez
+                else:
+                    liquidity_color = "🔴"  # Vermelho para baixa liquidez
+                
+                embed.add_field(
+                    name="💧 Liquidez", 
+                    value=f"{liquidity_color} {liquidity_score:.1f}/100", 
                     inline=True
                 )
             

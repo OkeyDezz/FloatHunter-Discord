@@ -495,14 +495,54 @@ class MarketplaceScanner:
             if not item:
                 return
             
+            # Busca informações adicionais da database
+            await self._enrich_item_data(item)
+            
             # Verifica se passa nos filtros
             if await self._check_filters(item):
-                logger.info(f"🎯 Oportunidade encontrada: {item.get('name', 'Unknown')}")
+                logger.info(f"🎯 OPORTUNIDADE ENCONTRADA: {item.get('name')}")
+                
+                # Chama callback de oportunidade
                 if self.opportunity_callback:
-                    await self.opportunity_callback(item, "csgoempire")
-            
+                    await self.opportunity_callback(item, 'csgoempire')
+                else:
+                    logger.warning("⚠️ Callback de oportunidade não configurado")
+            else:
+                logger.debug(f"Item {item.get('name')} não passou nos filtros")
+                
         except Exception as e:
             logger.error(f"❌ Erro ao processar item: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    async def _enrich_item_data(self, item: Dict):
+        """Enriquece o item com dados da database (preço Buff163 e liquidez)."""
+        try:
+            market_hash_name = item.get('market_hash_name')
+            if not market_hash_name:
+                logger.warning("⚠️ Sem market_hash_name para enriquecer item")
+                return
+            
+            # Busca preço Buff163
+            price_buff163 = await self.supabase.get_buff163_price(market_hash_name)
+            if price_buff163:
+                item['price_buff163'] = price_buff163
+                logger.info(f"💰 Preço Buff163 encontrado: ${price_buff163:.2f}")
+            else:
+                logger.warning(f"⚠️ Preço Buff163 não encontrado para: {market_hash_name}")
+            
+            # Busca score de liquidez
+            liquidity_score = await self.supabase.get_liquidity_score(market_hash_name)
+            if liquidity_score is not None:
+                item['liquidity_score'] = liquidity_score
+                logger.info(f"💧 Score de liquidez encontrado: {liquidity_score:.1f}")
+            else:
+                logger.warning(f"⚠️ Score de liquidez não encontrado para: {market_hash_name}")
+                
+        except Exception as e:
+            logger.error(f"❌ Erro ao enriquecer item: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _extract_item_data(self, data: Dict) -> Optional[Dict]:
         """Extrai dados relevantes do item do CSGOEmpire."""

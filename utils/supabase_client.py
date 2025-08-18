@@ -237,7 +237,8 @@ class SupabaseClient:
 
     async def get_buff163_price_advanced(self, base_name: str, is_stattrak: bool, is_souvenir: bool, condition: str) -> Optional[float]:
         """
-        Obtém o preço do Buff163 para um item usando o formato correto da tabela market_data.
+        Obtém o preço do Buff163 para um item usando a mesma lógica do bot principal.
+        Consulta pelos campos name_base, stattrak, souvenir e condition separadamente.
         
         Args:
             base_name: Nome base do item
@@ -258,22 +259,55 @@ class SupabaseClient:
             logger.info(f"   - Souvenir: {is_souvenir}")
             logger.info(f"   - Condição: {condition}")
             
-            # Primeira tentativa: busca exata com nome construído
-            market_data_name = self._build_market_data_name(base_name, is_stattrak, is_souvenir, condition)
-            logger.info(f"🔍 Nome para busca na tabela market_data: '{market_data_name}'")
+            # Primeira tentativa: busca usando os campos separados (mesma lógica do bot principal)
+            logger.info(f"🔍 Buscando por campos separados...")
             
-            response = self.client.table('market_data').select('price_buff163').eq('item_key', market_data_name).execute()
-            logger.info(f"📊 Busca exata - Resposta: {response.data}")
+            # Remove parênteses da condição se presente (para compatibilidade)
+            clean_condition = condition
+            if condition and condition.startswith('(') and condition.endswith(')'):
+                clean_condition = condition[1:-1].strip()
+            
+            # Constrói a query usando os campos separados
+            query = self.client.table('market_data').select('price_buff163')
+            
+            # Filtra por name_base
+            query = query.eq('name_base', base_name)
+            
+            # Filtra por stattrak
+            query = query.eq('stattrak', is_stattrak)
+            
+            # Filtra por souvenir
+            query = query.eq('souvenir', is_souvenir)
+            
+            # Filtra por condition
+            if clean_condition:
+                query = query.eq('condition', clean_condition)
+            
+            response = query.execute()
+            logger.info(f"📊 Busca por campos separados - Resposta: {response.data}")
             
             if response.data and len(response.data) > 0:
                 price_buff163 = response.data[0].get('price_buff163')
                 if price_buff163 is not None:
-                    logger.info(f"✅ Preço Buff163 encontrado (busca exata): ${price_buff163}")
+                    logger.info(f"✅ Preço Buff163 encontrado (campos separados): ${price_buff163}")
                     return float(price_buff163)
             
-            # Segunda tentativa: busca por similaridade (mesma lógica que funciona para liquidity)
+            # Segunda tentativa: busca usando item_key construído (formato antigo)
+            market_data_name = self._build_market_data_name(base_name, is_stattrak, is_souvenir, condition)
+            logger.info(f"🔍 Tentando busca por item_key: '{market_data_name}'")
+            
+            response = self.client.table('market_data').select('price_buff163').eq('item_key', market_data_name).execute()
+            logger.info(f"📊 Busca por item_key - Resposta: {response.data}")
+            
+            if response.data and len(response.data) > 0:
+                price_buff163 = response.data[0].get('price_buff163')
+                if price_buff163 is not None:
+                    logger.info(f"✅ Preço Buff163 encontrado (item_key): ${price_buff163}")
+                    return float(price_buff163)
+            
+            # Terceira tentativa: busca por similaridade usando name_base
             logger.info(f"🔍 Tentando busca por similaridade...")
-            response = self.client.table('market_data').select('item_key, price_buff163').ilike('item_key', f'%{base_name}%').limit(10).execute()
+            response = self.client.table('market_data').select('item_key, price_buff163, name_base, stattrak, souvenir, condition').ilike('name_base', f'%{base_name}%').limit(10).execute()
             
             logger.info(f"📊 Busca por similaridade - Resposta: {response.data}")
             
@@ -282,31 +316,33 @@ class SupabaseClient:
                 logger.info(f"📊 Itens similares encontrados:")
                 for i, item in enumerate(response.data):
                     logger.info(f"   {i+1}. '{item.get('item_key')}' - Preço: ${item.get('price_buff163')}")
+                    logger.info(f"      name_base: {item.get('name_base')}, stattrak: {item.get('stattrak')}, souvenir: {item.get('souvenir')}, condition: {item.get('condition')}")
                 
                 # Tenta encontrar o mais similar
                 for item in response.data:
-                    item_key = item.get('item_key', '')
-                    if self._is_similar_market_data_item(item_key, base_name, is_stattrak, is_souvenir, condition):
+                    item_name_base = item.get('name_base', '')
+                    item_stattrak = item.get('stattrak', False)
+                    item_souvenir = item.get('souvenir', False)
+                    item_condition = item.get('condition', '')
+                    
+                    # Verifica se os campos correspondem
+                    if (item_name_base == base_name and 
+                        item_stattrak == is_stattrak and 
+                        item_souvenir == is_souvenir and 
+                        item_condition == clean_condition):
+                        
                         price_buff163 = item.get('price_buff163')
                         if price_buff163 is not None:
-                            logger.info(f"✅ Preço Buff163 encontrado por similaridade: ${price_buff163}")
+                            logger.info(f"✅ Preço Buff163 encontrado por similaridade (campos exatos): ${price_buff163}")
                             return float(price_buff163)
-            
-            # Terceira tentativa: busca usando apenas o nome base (sem condição)
-            logger.info(f"🔍 Tentando busca apenas com nome base...")
-            response = self.client.table('market_data').select('item_key, price_buff163').ilike('item_key', f'%{base_name}%').limit(5).execute()
-            
-            if response.data and len(response.data) > 0:
-                logger.info(f"📊 Itens com nome base encontrados:")
-                for i, item in enumerate(response.data):
-                    logger.info(f"   {i+1}. '{item.get('item_key')}' - Preço: ${item.get('price_buff163')}")
                 
-                # Aceita o primeiro item encontrado (fallback)
-                first_item = response.data[0]
-                price_buff163 = first_item.get('price_buff163')
-                if price_buff163 is not None:
-                    logger.info(f"✅ Preço Buff163 encontrado por fallback (nome base): ${price_buff163}")
-                    return float(price_buff163)
+                # Se não encontrou exato, aceita o primeiro com name_base igual
+                for item in response.data:
+                    if item.get('name_base') == base_name:
+                        price_buff163 = item.get('price_buff163')
+                        if price_buff163 is not None:
+                            logger.info(f"✅ Preço Buff163 encontrado por fallback (name_base): ${price_buff163}")
+                            return float(price_buff163)
             
             logger.warning(f"⚠️ Nenhum preço Buff163 encontrado para: {base_name}")
             return None

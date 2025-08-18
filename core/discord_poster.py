@@ -138,10 +138,10 @@ class DiscordPoster:
                     inline=True
                 )
             
-            if 'suggested_price' in item:
+            if 'suggested_price_csgoempire' in item:
                 embed.add_field(
-                    name="💡 Preço Sugerido", 
-                    value=f"${item['suggested_price']:.2f}", 
+                    name="💡 Preço Sugerido CSGOEmpire", 
+                    value=f"${item['suggested_price_csgoempire']:.2f}", 
                     inline=True
                 )
             

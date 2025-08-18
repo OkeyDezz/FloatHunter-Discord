@@ -572,7 +572,7 @@ class MarketplaceScanner:
             
             logger.info(f"💰 Item: {market_name}")
             logger.info(f"   - Preço CSGOEmpire: {purchase_price} centavos = ${price_usd:.2f}")
-            logger.info(f"   - Preço sugerido: ${suggested_price}")
+            logger.info(f"   - Preço sugerido CSGOEmpire: ${suggested_price}")
             logger.info(f"   - Leilão termina: {auction_ends_at}")
             logger.info(f"   - Lances: {auction_number_of_bids}")
             
@@ -582,7 +582,7 @@ class MarketplaceScanner:
                 'market_hash_name': market_name,  # Usa market_name como fallback
                 'price': price_usd,  # Preço convertido para USD
                 'price_centavos': purchase_price,  # Preço original em centavos
-                'suggested_price': suggested_price,  # Preço sugerido
+                'suggested_price_csgoempire': suggested_price,  # Preço sugerido do CSGOEmpire
                 'condition': condition,
                 'float_value': float_value,
                 'stattrak': stattrak,

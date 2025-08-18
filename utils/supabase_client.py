@@ -237,7 +237,7 @@ class SupabaseClient:
 
     async def get_buff163_price_advanced(self, base_name: str, is_stattrak: bool, is_souvenir: bool, condition: str) -> Optional[float]:
         """
-        Obtém o preço do Buff163 para um item usando campos específicos.
+        Obtém o preço do Buff163 para um item usando o formato correto da tabela market_data.
         
         Args:
             base_name: Nome base do item
@@ -258,32 +258,41 @@ class SupabaseClient:
             logger.info(f"   - Souvenir: {is_souvenir}")
             logger.info(f"   - Condição: {condition}")
             
-            # Constrói a query usando os campos corretos
-            query = self.client.table('market_data').select('price_buff163')
+            # Constrói o nome no formato da tabela market_data
+            market_data_name = self._build_market_data_name(base_name, is_stattrak, is_souvenir, condition)
+            logger.info(f"🔍 Nome para busca na tabela market_data: '{market_data_name}'")
             
-            # Filtra por nome base
-            query = query.eq('name_base', base_name)
+            # Primeira tentativa: busca exata
+            response = self.client.table('market_data').select('price_buff163').eq('item_key', market_data_name).execute()
             
-            # Filtra por StatTrak
-            query = query.eq('stattrak', is_stattrak)
-            
-            # Filtra por Souvenir
-            query = query.eq('souvenir', is_souvenir)
-            
-            # Filtra por condição
-            if condition:
-                query = query.eq('condition', condition)
-            
-            response = query.execute()
-            
-            logger.info(f"📊 Resposta da database: {response.data}")
-            logger.info(f"📊 Número de registros encontrados: {len(response.data) if response.data else 0}")
+            logger.info(f"📊 Busca exata - Resposta: {response.data}")
             
             if response.data and len(response.data) > 0:
                 price_buff163 = response.data[0].get('price_buff163')
                 if price_buff163 is not None:
-                    logger.info(f"✅ Preço Buff163 encontrado: ${price_buff163}")
+                    logger.info(f"✅ Preço Buff163 encontrado (busca exata): ${price_buff163}")
                     return float(price_buff163)
+            
+            # Segunda tentativa: busca por similaridade (contains)
+            logger.info(f"🔍 Tentando busca por similaridade...")
+            response = self.client.table('market_data').select('item_key, price_buff163').ilike('item_key', f'%{base_name}%').limit(10).execute()
+            
+            logger.info(f"📊 Busca por similaridade - Resposta: {response.data}")
+            
+            if response.data and len(response.data) > 0:
+                # Mostra todos os itens similares encontrados
+                logger.info(f"📊 Itens similares encontrados:")
+                for i, item in enumerate(response.data):
+                    logger.info(f"   {i+1}. '{item.get('item_key')}' - Preço: ${item.get('price_buff163')}")
+                
+                # Tenta encontrar o mais similar
+                for item in response.data:
+                    item_key = item.get('item_key', '')
+                    if self._is_similar_market_data_item(item_key, base_name, is_stattrak, is_souvenir, condition):
+                        price_buff163 = item.get('price_buff163')
+                        if price_buff163 is not None:
+                            logger.info(f"✅ Preço Buff163 encontrado por similaridade: ${price_buff163}")
+                            return float(price_buff163)
             
             logger.warning(f"⚠️ Nenhum preço Buff163 encontrado para: {base_name}")
             return None
@@ -406,6 +415,90 @@ class SupabaseClient:
         
         Args:
             item_key: Nome do item na tabela liquidity
+            base_name: Nome base do item
+            is_stattrak: Se é StatTrak
+            is_souvenir: Se é Souvenir
+            condition: Condição do item
+            
+        Returns:
+            bool: True se os itens são similares
+        """
+        try:
+            # Remove "★" se presente
+            if item_key.startswith('★'):
+                item_key = item_key[1:].strip()
+            
+            # Verifica se contém o nome base
+            if base_name.lower() not in item_key.lower():
+                return False
+            
+            # Verifica StatTrak
+            has_stattrak = "StatTrak" in item_key
+            if is_stattrak != has_stattrak:
+                return False
+            
+            # Verifica Souvenir
+            has_souvenir = "Souvenir" in item_key
+            if is_souvenir != has_souvenir:
+                return False
+            
+            # Verifica condição (se especificada)
+            if condition:
+                if condition.lower() not in item_key.lower():
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao verificar similaridade: {e}")
+            return False
+
+    def _build_market_data_name(self, base_name: str, is_stattrak: bool, is_souvenir: bool, condition: str) -> str:
+        """
+        Constrói o nome no formato da tabela market_data.
+        
+        Args:
+            base_name: Nome base do item
+            is_stattrak: Se é StatTrak
+            is_souvenir: Se é Souvenir
+            condition: Condição do item
+            
+        Returns:
+            str: Nome no formato da tabela market_data
+        """
+        try:
+            # Remove "★" se presente no início
+            if base_name.startswith('★'):
+                base_name = base_name[1:].strip()
+            
+            # Se é Souvenir, adiciona no início
+            if is_souvenir:
+                market_data_name = f"Souvenir | {base_name}"
+            else:
+                market_data_name = base_name
+            
+            # Se é StatTrak, adiciona antes da condição
+            if is_stattrak:
+                if condition:
+                    market_data_name = f"{market_data_name} | StatTrak | {condition}"
+                else:
+                    market_data_name = f"{market_data_name} | StatTrak"
+            elif condition:
+                market_data_name = f"{market_data_name} | {condition}"
+            
+            logger.info(f"🔧 Nome construído para market_data: '{market_data_name}'")
+            return market_data_name
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao construir nome para market_data: {e}")
+            return base_name
+    
+    def _is_similar_market_data_item(self, item_key: str, base_name: str, is_stattrak: bool, is_souvenir: bool, condition: str) -> bool:
+        """
+        Verifica se um item da tabela market_data é similar ao item buscado.
+        
+        Args:
+            item_key: Nome do item na tabela market_data
             base_name: Nome base do item
             is_stattrak: Se é StatTrak
             is_souvenir: Se é Souvenir

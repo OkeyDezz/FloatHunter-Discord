@@ -518,26 +518,48 @@ class MarketplaceScanner:
     async def _enrich_item_data(self, item: Dict):
         """Enriquece o item com dados da database (preço Buff163 e liquidez)."""
         try:
-            market_hash_name = item.get('market_hash_name')
-            if not market_hash_name:
-                logger.warning("⚠️ Sem market_hash_name para enriquecer item")
+            # Usa os campos parseados do item
+            base_name = item.get('base_name')
+            is_stattrak = item.get('is_stattrak', False)
+            is_souvenir = item.get('is_souvenir', False)
+            condition = item.get('condition', '')
+            
+            if not base_name:
+                logger.warning("⚠️ Sem base_name para enriquecer item")
                 return
             
-            # Busca preço Buff163
-            price_buff163 = await self.supabase.get_buff163_price(market_hash_name)
+            logger.info(f"🔍 Enriquecendo item: {base_name}")
+            logger.info(f"   - StatTrak: {is_stattrak}")
+            logger.info(f"   - Souvenir: {is_souvenir}")
+            logger.info(f"   - Condição: {condition}")
+            
+            # Busca preço Buff163 usando os campos corretos
+            price_buff163 = await self.supabase.get_buff163_price_advanced(
+                base_name=base_name,
+                is_stattrak=is_stattrak,
+                is_souvenir=is_souvenir,
+                condition=condition
+            )
+            
             if price_buff163:
                 item['price_buff163'] = price_buff163
                 logger.info(f"💰 Preço Buff163 encontrado: ${price_buff163:.2f}")
             else:
-                logger.warning(f"⚠️ Preço Buff163 não encontrado para: {market_hash_name}")
+                logger.warning(f"⚠️ Preço Buff163 não encontrado para: {base_name}")
             
-            # Busca score de liquidez
-            liquidity_score = await self.supabase.get_liquidity_score(market_hash_name)
+            # Busca score de liquidez usando os campos corretos
+            liquidity_score = await self.supabase.get_liquidity_score_advanced(
+                base_name=base_name,
+                is_stattrak=is_stattrak,
+                is_souvenir=is_souvenir,
+                condition=condition
+            )
+            
             if liquidity_score is not None:
                 item['liquidity_score'] = liquidity_score
                 logger.info(f"💧 Score de liquidez encontrado: {liquidity_score:.1f}")
             else:
-                logger.warning(f"⚠️ Score de liquidez não encontrado para: {market_hash_name}")
+                logger.warning(f"⚠️ Score de liquidez não encontrado para: {base_name}")
                 
         except Exception as e:
             logger.error(f"❌ Erro ao enriquecer item: {e}")
@@ -550,18 +572,18 @@ class MarketplaceScanner:
             # Campos obrigatórios do CSGOEmpire
             item_id = data.get('id')
             market_name = data.get('market_name')
-            purchase_price = data.get('purchase_price')  # Preço em coin
+            purchase_price = data.get('purchase_price')  # Preço em centavos
             suggested_price = data.get('suggested_price')  # Preço sugerido em USD
             
             if not all([item_id, market_name, purchase_price]):
                 logger.debug(f"Dados incompletos do item: {data}")
                 return None
             
+            # Parse do nome do item (baseado no bot principal)
+            base_name, is_stattrak, is_souvenir, condition = self._parse_market_hash_name(market_name)
+            
             # Dados adicionais
-            condition = data.get('wear_name', 'Unknown')
             float_value = data.get('wear')
-            stattrak = data.get('stattrak', False)
-            souvenir = data.get('souvenir', False)
             auction_ends_at = data.get('auction_ends_at')
             auction_highest_bid = data.get('auction_highest_bid')
             auction_number_of_bids = data.get('auction_number_of_bids', 0)
@@ -571,6 +593,10 @@ class MarketplaceScanner:
             price_usd = (purchase_price / 100) * self.settings.COIN_TO_USD_FACTOR
             
             logger.info(f"💰 Item: {market_name}")
+            logger.info(f"   - Base: {base_name}")
+            logger.info(f"   - StatTrak: {is_stattrak}")
+            logger.info(f"   - Souvenir: {is_souvenir}")
+            logger.info(f"   - Condição: {condition}")
             logger.info(f"   - Preço CSGOEmpire: {purchase_price} centavos = ${price_usd:.2f}")
             logger.info(f"   - Preço sugerido CSGOEmpire: ${suggested_price}")
             logger.info(f"   - Leilão termina: {auction_ends_at}")
@@ -579,14 +605,15 @@ class MarketplaceScanner:
             return {
                 'id': item_id,
                 'name': market_name,
-                'market_hash_name': market_name,  # Usa market_name como fallback
+                'market_hash_name': market_name,  # Nome completo para busca
+                'base_name': base_name,  # Nome base sem flags
+                'is_stattrak': is_stattrak,
+                'is_souvenir': is_souvenir,
+                'condition': condition,
                 'price': price_usd,  # Preço convertido para USD
                 'price_centavos': purchase_price,  # Preço original em centavos
                 'suggested_price_csgoempire': suggested_price,  # Preço sugerido do CSGOEmpire
-                'condition': condition,
                 'float_value': float_value,
-                'stattrak': stattrak,
-                'souvenir': souvenir,
                 'auction_ends_at': auction_ends_at,
                 'auction_highest_bid': auction_highest_bid,
                 'auction_number_of_bids': auction_number_of_bids,
@@ -599,6 +626,56 @@ class MarketplaceScanner:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
+    
+    def _parse_market_hash_name(self, name: str) -> tuple:
+        """
+        Parse do nome do item (baseado no bot principal).
+        
+        Args:
+            name: Nome completo do item
+            
+        Returns:
+            tuple: (base_name, is_stattrak, is_souvenir, condition)
+        """
+        try:
+            if not name:
+                return "", False, False, None
+            
+            s = name.strip()
+            stattrak = ("StatTrak™" in s) or ("StatTrak" in s)
+            souvenir = ("Souvenir" in s)
+            condition_local = None
+            
+            # Lista de condições possíveis
+            conditions = [
+                "Factory New",
+                "Minimal Wear", 
+                "Field-Tested",
+                "Well-Worn",
+                "Battle-Scarred",
+            ]
+            
+            # Remove a condição do final do nome
+            for c in conditions:
+                suffix = f"({c})"
+                if s.endswith(suffix):
+                    condition_local = c
+                    s = s[: -len(suffix)].strip()
+                    break
+            
+            # Remove flags do início do nome
+            base = (
+                s.replace("StatTrak™ ", "")
+                 .replace("StatTrak ", "")
+                 .replace("Souvenir ", "")
+                 .strip()
+            )
+            
+            return base, stattrak, souvenir, condition_local
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao fazer parse do nome: {e}")
+            return name, False, False, None
     
     async def _check_filters(self, item: Dict) -> bool:
         """Verifica se o item passa nos filtros configurados."""

@@ -138,14 +138,32 @@ class DiscordPoster:
                     inline=True
                 )
             
-            if 'suggested_price_csgoempire' in item:
-                embed.add_field(
-                    name="💡 Preço Sugerido CSGOEmpire", 
-                    value=f"${item['suggested_price_csgoempire']:.2f}", 
-                    inline=True
-                )
+            # Calcula e mostra o lucro percentual
+            if 'price' in item and 'price_buff163' in item:
+                try:
+                    price_csgoempire = float(item['price'])
+                    price_buff163 = float(item['price_buff163'])
+                    
+                    if price_csgoempire > 0:
+                        profit_percentage = ((price_buff163 - price_csgoempire) / price_csgoempire) * 100
+                        
+                        # Define cor baseada no lucro
+                        if profit_percentage >= 20:
+                            profit_color = "🟢"  # Verde para alto lucro
+                        elif profit_percentage >= 10:
+                            profit_color = "🟡"  # Amarelo para médio lucro
+                        else:
+                            profit_color = "🔴"  # Vermelho para baixo lucro
+                        
+                        embed.add_field(
+                            name="📈 Lucro Potencial", 
+                            value=f"{profit_color} {profit_percentage:+.2f}%", 
+                            inline=True
+                        )
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"⚠️ Erro ao calcular lucro: {e}")
             
-            # Adiciona informações de liquidez
+            # Adiciona informações de liquidez (SEMPRE mostrar)
             if 'liquidity_score' in item:
                 liquidity_score = item['liquidity_score']
                 # Define cor baseada no score de liquidez
@@ -159,6 +177,13 @@ class DiscordPoster:
                 embed.add_field(
                     name="💧 Liquidez", 
                     value=f"{liquidity_color} {liquidity_score:.1f}/100", 
+                    inline=True
+                )
+            else:
+                # Se não tiver liquidez, mostra como "N/A"
+                embed.add_field(
+                    name="💧 Liquidez", 
+                    value="❓ N/A", 
                     inline=True
                 )
             

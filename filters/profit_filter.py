@@ -32,12 +32,19 @@ class ProfitFilter:
             profit_potential = await self.calculate_profit_potential(item)
             
             if profit_potential is None:
-                # Se não conseguir calcular, aceita o item (fallback)
-                logger.debug(f"Item {item.get('name')} aceito por fallback (lucro não calculável)")
-                return True
+                # Se não conseguir calcular, REJEITA o item (não aceita por fallback)
+                logger.debug(f"Item {item.get('name')} REJEITADO - lucro não calculável")
+                return False
             
             # Verifica se atende ao percentual mínimo
-            return profit_potential >= self.min_profit_percentage
+            result = profit_potential >= self.min_profit_percentage
+            
+            if result:
+                logger.info(f"✅ Item {item.get('name')} ACEITO - lucro {profit_potential:.2f}% >= {self.min_profit_percentage}%")
+            else:
+                logger.info(f"❌ Item {item.get('name')} REJEITADO - lucro {profit_potential:.2f}% < {self.min_profit_percentage}%")
+            
+            return result
             
         except Exception as e:
             logger.error(f"Erro ao verificar filtro de lucro: {e}")

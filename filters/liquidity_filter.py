@@ -16,31 +16,26 @@ class LiquidityFilter:
         self.supabase = SupabaseClient()
     
     async def check(self, item: Dict) -> bool:
-        """
-        Verifica se o item atende aos critérios de liquidez.
-        
-        Args:
-            item: Dicionário com dados do item
-            
-        Returns:
-            bool: True se o item atende aos critérios
-        """
+        """Verifica se um item tem boa liquidez."""
         try:
-            # Obtém score de liquidez diretamente da tabela
             liquidity_score = await self.supabase.get_liquidity_score(item.get('market_hash_name'))
-            
+
             if liquidity_score is None:
-                # Se não conseguir obter, aceita o item (fallback)
-                logger.debug(f"Item {item.get('name')} aceito por fallback (liquidez não disponível)")
-                return True
-            
-            # Verifica se atende ao score mínimo
+                # Se não conseguir obter liquidez, REJEITA o item (não aceita por fallback)
+                logger.debug(f"Item {item.get('name')} REJEITADO - liquidez não disponível")
+                return False
+
             result = liquidity_score >= self.min_liquidity_score
-            
+
+            if result:
+                logger.info(f"✅ Item {item.get('name')} ACEITO - liquidez {liquidity_score:.1f} >= {self.min_liquidity_score}")
+            else:
+                logger.info(f"❌ Item {item.get('name')} REJEITADO - liquidez {liquidity_score:.1f} < {self.min_liquidity_score}")
+
             logger.debug(f"Liquidez: {liquidity_score:.1f} >= {self.min_liquidity_score} = {result} para {item.get('name')}")
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Erro ao verificar filtro de liquidez: {e}")
             return False

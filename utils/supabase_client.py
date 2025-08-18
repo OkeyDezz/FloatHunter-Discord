@@ -49,28 +49,43 @@ class SupabaseClient:
                 return None
             
             logger.info(f"🔍 Buscando preço Buff163 para: '{market_hash_name}'")
-            logger.info(f"🔍 Query: SELECT price_buff163 FROM market_data WHERE item_key = '{market_hash_name}'")
             
-            # Busca apenas o preço do Buff163 na tabela market_data
+            # Primeira tentativa: busca exata
             response = self.client.table('market_data').select(
                 'price_buff163'
             ).eq('item_key', market_hash_name).execute()
             
-            logger.info(f"📊 Resposta da database: {response.data}")
-            logger.info(f"📊 Número de registros encontrados: {len(response.data) if response.data else 0}")
+            logger.info(f"📊 Busca exata - Resposta: {response.data}")
             
-            if not response.data:
-                logger.warning(f"⚠️ Nenhum registro encontrado para item_key: '{market_hash_name}'")
-                return None
+            if response.data and len(response.data) > 0:
+                price_buff163 = response.data[0].get('price_buff163')
+                if price_buff163 is not None:
+                    logger.info(f"✅ Preço Buff163 encontrado (busca exata): ${price_buff163}")
+                    return float(price_buff163)
             
-            price_buff163 = response.data[0].get('price_buff163')
-            logger.info(f"📊 Campo price_buff163 extraído: {price_buff163}")
+            # Segunda tentativa: busca por similaridade (contains)
+            logger.info(f"🔍 Tentando busca por similaridade...")
+            response = self.client.table('market_data').select(
+                'item_key, price_buff163'
+            ).ilike('item_key', f'%{market_hash_name}%').limit(5).execute()
             
-            if price_buff163 is not None:
-                logger.info(f"✅ Preço Buff163 encontrado: ${price_buff163}")
-                return float(price_buff163)
+            logger.info(f"📊 Busca por similaridade - Resposta: {response.data}")
             
-            logger.warning(f"⚠️ Campo price_buff163 é None para '{market_hash_name}'")
+            if response.data and len(response.data) > 0:
+                # Mostra todos os itens similares encontrados
+                for i, item in enumerate(response.data):
+                    logger.info(f"📊 Item similar {i+1}: '{item.get('item_key')}' - Preço: ${item.get('price_buff163')}")
+                
+                # Tenta encontrar o mais similar
+                for item in response.data:
+                    item_key = item.get('item_key', '')
+                    if market_hash_name.lower() in item_key.lower():
+                        price_buff163 = item.get('price_buff163')
+                        if price_buff163 is not None:
+                            logger.info(f"✅ Preço Buff163 encontrado (similaridade): ${price_buff163}")
+                            return float(price_buff163)
+            
+            logger.warning(f"⚠️ Nenhum preço Buff163 encontrado para: '{market_hash_name}'")
             return None
             
         except Exception as e:
@@ -95,28 +110,43 @@ class SupabaseClient:
                 return None
             
             logger.info(f"🔍 Buscando score de liquidez para: '{market_hash_name}'")
-            logger.info(f"🔍 Query: SELECT liquidity_score FROM liquidity WHERE item_key = '{market_hash_name}'")
             
-            # Busca apenas o liquidity_score na tabela liquidity
+            # Primeira tentativa: busca exata
             response = self.client.table('liquidity').select(
                 'liquidity_score'
             ).eq('item_key', market_hash_name).execute()
             
-            logger.info(f"📊 Resposta da database: {response.data}")
-            logger.info(f"📊 Número de registros encontrados: {len(response.data) if response.data else 0}")
+            logger.info(f"📊 Busca exata - Resposta: {response.data}")
             
-            if not response.data:
-                logger.warning(f"⚠️ Nenhum registro encontrado para item_key: '{market_hash_name}'")
-                return None
+            if response.data and len(response.data) > 0:
+                liquidity_score = response.data[0].get('liquidity_score')
+                if liquidity_score is not None:
+                    logger.info(f"✅ Score de liquidez encontrado (busca exata): {liquidity_score}")
+                    return float(liquidity_score)
             
-            liquidity_score = response.data[0].get('liquidity_score')
-            logger.info(f"📊 Campo liquidity_score extraído: {liquidity_score}")
+            # Segunda tentativa: busca por similaridade (contains)
+            logger.info(f"🔍 Tentando busca por similaridade...")
+            response = self.client.table('liquidity').select(
+                'item_key, liquidity_score'
+            ).ilike('item_key', f'%{market_hash_name}%').limit(5).execute()
             
-            if liquidity_score is not None:
-                logger.info(f"✅ Score de liquidez encontrado: {liquidity_score}")
-                return float(liquidity_score)
+            logger.info(f"📊 Busca por similaridade - Resposta: {response.data}")
             
-            logger.warning(f"⚠️ Campo liquidity_score é None para '{market_hash_name}'")
+            if response.data and len(response.data) > 0:
+                # Mostra todos os itens similares encontrados
+                for i, item in enumerate(response.data):
+                    logger.info(f"📊 Item similar {i+1}: '{item.get('item_key')}' - Liquidez: {item.get('liquidity_score')}")
+                
+                # Tenta encontrar o mais similar
+                for item in response.data:
+                    item_key = item.get('item_key', '')
+                    if market_hash_name.lower() in item_key.lower():
+                        liquidity_score = item.get('liquidity_score')
+                        if liquidity_score is not None:
+                            logger.info(f"✅ Score de liquidez encontrado (similaridade): {liquidity_score}")
+                            return float(liquidity_score)
+            
+            logger.warning(f"⚠️ Nenhum score de liquidez encontrado para: '{market_hash_name}'")
             return None
             
         except Exception as e:
@@ -204,3 +234,121 @@ class SupabaseClient:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
+
+    async def get_buff163_price_advanced(self, base_name: str, is_stattrak: bool, is_souvenir: bool, condition: str) -> Optional[float]:
+        """
+        Obtém o preço do Buff163 para um item usando campos específicos.
+        
+        Args:
+            base_name: Nome base do item
+            is_stattrak: Se é StatTrak
+            is_souvenir: Se é Souvenir
+            condition: Condição do item
+            
+        Returns:
+            float: Preço do Buff163 em dólar ou None se não encontrado
+        """
+        try:
+            if not self.client:
+                logger.error("❌ Cliente Supabase não inicializado")
+                return None
+            
+            logger.info(f"🔍 Buscando preço Buff163 para: {base_name}")
+            logger.info(f"   - StatTrak: {is_stattrak}")
+            logger.info(f"   - Souvenir: {is_souvenir}")
+            logger.info(f"   - Condição: {condition}")
+            
+            # Constrói a query usando os campos corretos
+            query = self.client.table('market_data').select('price_buff163')
+            
+            # Filtra por nome base
+            query = query.eq('name_base', base_name)
+            
+            # Filtra por StatTrak
+            query = query.eq('stattrak', is_stattrak)
+            
+            # Filtra por Souvenir
+            query = query.eq('souvenir', is_souvenir)
+            
+            # Filtra por condição
+            if condition:
+                query = query.eq('condition', condition)
+            
+            response = query.execute()
+            
+            logger.info(f"📊 Resposta da database: {response.data}")
+            logger.info(f"📊 Número de registros encontrados: {len(response.data) if response.data else 0}")
+            
+            if response.data and len(response.data) > 0:
+                price_buff163 = response.data[0].get('price_buff163')
+                if price_buff163 is not None:
+                    logger.info(f"✅ Preço Buff163 encontrado: ${price_buff163}")
+                    return float(price_buff163)
+            
+            logger.warning(f"⚠️ Nenhum preço Buff163 encontrado para: {base_name}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao buscar preço Buff163: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None
+    
+    async def get_liquidity_score_advanced(self, base_name: str, is_stattrak: bool, is_souvenir: bool, condition: str) -> Optional[float]:
+        """
+        Obtém o score de liquidez para um item usando campos específicos.
+        
+        Args:
+            base_name: Nome base do item
+            is_stattrak: Se é StatTrak
+            is_souvenir: Se é Souvenir
+            condition: Condição do item
+            
+        Returns:
+            float: Score de liquidez (0.0 a 100.0) ou None se não encontrado
+        """
+        try:
+            if not self.client:
+                logger.error("❌ Cliente Supabase não inicializado")
+                return None
+            
+            logger.info(f"🔍 Buscando score de liquidez para: {base_name}")
+            logger.info(f"   - StatTrak: {is_stattrak}")
+            logger.info(f"   - Souvenir: {is_souvenir}")
+            logger.info(f"   - Condição: {condition}")
+            
+            # Constrói a query usando os campos corretos
+            query = self.client.table('liquidity').select('liquidity_score')
+            
+            # Filtra por nome base
+            query = query.eq('name_base', base_name)
+            
+            # Filtra por StatTrak
+            query = query.eq('stattrak', is_stattrak)
+            
+            # Filtra por Souvenir
+            query = query.eq('souvenir', is_souvenir)
+            
+            # Filtra por condição
+            if condition:
+                query = query.eq('condition', condition)
+            
+            response = query.execute()
+            
+            logger.info(f"📊 Resposta da database: {response.data}")
+            logger.info(f"📊 Número de registros encontrados: {len(response.data) if response.data else 0}")
+            
+            if response.data and len(response.data) > 0:
+                liquidity_score = response.data[0].get('liquidity_score')
+                if liquidity_score is not None:
+                    logger.info(f"✅ Score de liquidez encontrado: {liquidity_score}")
+                    return float(liquidity_score)
+            
+            logger.warning(f"⚠️ Nenhum score de liquidez encontrado para: {base_name}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao buscar score de liquidez: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None

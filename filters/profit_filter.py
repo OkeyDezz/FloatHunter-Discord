@@ -61,22 +61,19 @@ class ProfitFilter:
             float: Percentual de lucro potencial ou None se não puder calcular
         """
         try:
-            market_hash_name = item.get('market_hash_name')
             price_csgoempire_usd = item.get('price')  # Já vem convertido em USD
+            price_buff163_usd = item.get('price_buff163')  # Já obtido pelo marketplace_scanner
             
-            if not market_hash_name or price_csgoempire_usd is None:
-                logger.debug("Dados insuficientes para calcular lucro")
+            if price_csgoempire_usd is None:
+                logger.debug("Preço CSGOEmpire não disponível")
+                return None
+            
+            if price_buff163_usd is None:
+                logger.debug(f"Preço Buff163 não disponível para {item.get('name')}")
                 return None
             
             # O preço já vem convertido em USD do marketplace_scanner
             # Não precisa mais converter de coin para dólar
-            
-            # Obtém preço do Buff163 em dólar
-            price_buff163_usd = await self.supabase.get_buff163_price(market_hash_name)
-            
-            if not price_buff163_usd:
-                logger.debug(f"Sem preço Buff163 para {market_hash_name}")
-                return None
             
             # Calcula percentual de lucro
             profit_percentage = ((price_buff163_usd - price_csgoempire_usd) / price_csgoempire_usd) * 100

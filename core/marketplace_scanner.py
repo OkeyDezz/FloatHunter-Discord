@@ -179,12 +179,14 @@ class MarketplaceScanner:
                     # Processa cada item da lista
                     for item in data:
                         if isinstance(item, dict):
+                            logger.info(f"🎯 Processando item: {item.get('market_name', 'Unknown')} (ID: {item.get('id', 'Unknown')})")
                             await self._process_item(item, 'new_item')
                         else:
                             logger.warning(f"⚠️ Item não é dicionário: {type(item)} - {item}")
                 elif isinstance(data, dict):
                     logger.info(f"🆕 NOVO ITEM RECEBIDO: {data.get('market_name', 'Unknown')}")
                     logger.info(f"📊 Dados completos: {data}")
+                    logger.info(f"🎯 Processando item: {data.get('market_name', 'Unknown')} (ID: {data.get('id', 'Unknown')})")
                     await self._process_item(data, 'new_item')
                 else:
                     logger.warning(f"⚠️ Dados inesperados para new_item: {type(data)} - {data}")
@@ -206,12 +208,14 @@ class MarketplaceScanner:
                     # Processa cada item da lista
                     for item in data:
                         if isinstance(item, dict):
+                            logger.info(f"🎯 Processando item atualizado: {item.get('market_name', 'Unknown')} (ID: {item.get('id', 'Unknown')})")
                             await self._process_item(item, 'updated_item')
                         else:
                             logger.warning(f"⚠️ Item não é dicionário: {type(item)} - {item}")
                 elif isinstance(data, dict):
                     logger.info(f"🔄 ITEM ATUALIZADO: {data.get('market_name', 'Unknown')}")
                     logger.info(f"📊 Dados completos: {data}")
+                    logger.info(f"🎯 Processando item atualizado: {data.get('market_name', 'Unknown')} (ID: {data.get('id', 'Unknown')})")
                     await self._process_item(data, 'updated_item')
                 else:
                     logger.warning(f"⚠️ Dados inesperados para updated_item: {type(data)} - {data}")
@@ -501,42 +505,58 @@ class MarketplaceScanner:
             logger.error(f"❌ Erro ao processar item: {e}")
     
     def _extract_item_data(self, data: Dict) -> Optional[Dict]:
-        """Extrai dados relevantes do item."""
+        """Extrai dados relevantes do item do CSGOEmpire."""
         try:
-            # Estrutura de dados usada pelo bot principal
-            item_data = data.get('data', data)
+            # Campos obrigatórios do CSGOEmpire
+            item_id = data.get('id')
+            market_name = data.get('market_name')
+            purchase_price = data.get('purchase_price')  # Preço em coin
+            suggested_price = data.get('suggested_price')  # Preço sugerido em USD
             
-            # Campos obrigatórios
-            item_id = item_data.get('id')
-            name = item_data.get('name')
-            market_hash_name = item_data.get('market_hash_name')
-            price = item_data.get('price')
-            
-            if not all([item_id, name, market_hash_name, price]):
-                logger.debug(f"Dados incompletos do item: {item_data}")
+            if not all([item_id, market_name, purchase_price]):
+                logger.debug(f"Dados incompletos do item: {data}")
                 return None
             
             # Dados adicionais
-            condition = item_data.get('condition', 'Unknown')
-            float_value = item_data.get('float_value')
-            stattrak = item_data.get('stattrak', False)
-            souvenir = item_data.get('souvenir', False)
+            condition = data.get('wear_name', 'Unknown')
+            float_value = data.get('wear')
+            stattrak = data.get('stattrak', False)
+            souvenir = data.get('souvenir', False)
+            auction_ends_at = data.get('auction_ends_at')
+            auction_highest_bid = data.get('auction_highest_bid')
+            auction_number_of_bids = data.get('auction_number_of_bids', 0)
+            
+            # Converte preço de coin para USD (fator 0.614)
+            price_usd = purchase_price * self.settings.COIN_TO_USD_FACTOR
+            
+            logger.info(f"💰 Item: {market_name}")
+            logger.info(f"   - Preço CSGOEmpire: {purchase_price} coin = ${price_usd:.2f}")
+            logger.info(f"   - Preço sugerido: ${suggested_price}")
+            logger.info(f"   - Leilão termina: {auction_ends_at}")
+            logger.info(f"   - Lances: {auction_number_of_bids}")
             
             return {
                 'id': item_id,
-                'name': name,
-                'market_hash_name': market_hash_name,
-                'price': price,
+                'name': market_name,
+                'market_hash_name': market_name,  # Usa market_name como fallback
+                'price': price_usd,  # Preço convertido para USD
+                'price_coin': purchase_price,  # Preço original em coin
+                'suggested_price': suggested_price,  # Preço sugerido
                 'condition': condition,
                 'float_value': float_value,
                 'stattrak': stattrak,
                 'souvenir': souvenir,
+                'auction_ends_at': auction_ends_at,
+                'auction_highest_bid': auction_highest_bid,
+                'auction_number_of_bids': auction_number_of_bids,
                 'marketplace': 'csgoempire',
                 'detected_at': datetime.now().isoformat()
             }
             
         except Exception as e:
             logger.error(f"❌ Erro ao extrair dados do item: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
     
     async def _check_filters(self, item: Dict) -> bool:

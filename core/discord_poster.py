@@ -104,6 +104,10 @@ class DiscordPoster:
     def _create_opportunity_embed(self, item: Dict, marketplace: str) -> discord.Embed:
         """Cria um embed do Discord para a oportunidade."""
         try:
+            # Cria o link direto para o item no CSGOEmpire
+            item_id = item.get('id')
+            csgoempire_link = f"https://csgoempire.com/item/{item_id}" if item_id else None
+            
             embed = discord.Embed(
                 title="🎯 OPORTUNIDADE ENCONTRADA!",
                 description=f"**{item.get('name', 'Item desconhecido')}**",
@@ -111,21 +115,61 @@ class DiscordPoster:
                 timestamp=datetime.now()
             )
             
-            # Adiciona campos
+            # Adiciona link direto para o item
+            if csgoempire_link:
+                embed.add_field(
+                    name="🔗 Link Direto", 
+                    value=f"[Clique aqui para ver no CSGOEmpire]({csgoempire_link})", 
+                    inline=False
+                )
+            
+            # Adiciona campos de preço
             if 'price' in item:
                 embed.add_field(
-                    name="💰 Preço", 
+                    name="💰 Preço CSGOEmpire", 
                     value=f"${item['price']:.2f}", 
                     inline=True
                 )
             
-            if 'market_hash_name' in item:
+            if 'suggested_price' in item:
                 embed.add_field(
-                    name="🏷️ Market Hash", 
-                    value=item['market_hash_name'][:50] + "..." if len(item['market_hash_name']) > 50 else item['market_hash_name'], 
+                    name="💡 Preço Sugerido", 
+                    value=f"${item['suggested_price']:.2f}", 
                     inline=True
                 )
             
+            # Adiciona informações do leilão
+            if 'auction_ends_at' in item and item['auction_ends_at']:
+                auction_end = datetime.fromtimestamp(item['auction_ends_at'])
+                embed.add_field(
+                    name="⏰ Leilão Termina", 
+                    value=f"<t:{item['auction_ends_at']}:R>", 
+                    inline=True
+                )
+            
+            if 'auction_number_of_bids' in item:
+                embed.add_field(
+                    name="🏆 Lances", 
+                    value=str(item['auction_number_of_bids']), 
+                    inline=True
+                )
+            
+            # Adiciona informações do item
+            if 'condition' in item and item['condition'] != 'Unknown':
+                embed.add_field(
+                    name="🎨 Condição", 
+                    value=item['condition'], 
+                    inline=True
+                )
+            
+            if 'float_value' in item and item['float_value']:
+                embed.add_field(
+                    name="🔢 Float", 
+                    value=f"{item['float_value']:.4f}", 
+                    inline=True
+                )
+            
+            # Adiciona marketplace
             embed.add_field(
                 name="🏪 Marketplace", 
                 value=marketplace.upper(), 

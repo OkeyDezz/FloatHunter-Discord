@@ -30,7 +30,8 @@ class Settings:
     MIN_PRICE: float = float(os.getenv('MIN_PRICE', '1.0'))
     MAX_PRICE: float = float(os.getenv('MAX_PRICE', '1000.0'))
     
-    # Fator de conversão coin para dólar (CSGOEmpire)
+    # Fator de conversão centavos para dólar (CSGOEmpire)
+    # CSGOEmpire retorna preços em centavos, não em coin
     COIN_TO_USD_FACTOR: float = float(os.getenv('COIN_TO_USD_FACTOR', '0.614'))
     
     # Configurações de scan

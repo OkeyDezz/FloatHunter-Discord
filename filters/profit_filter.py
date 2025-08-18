@@ -55,14 +55,14 @@ class ProfitFilter:
         """
         try:
             market_hash_name = item.get('market_hash_name')
-            price_csgoempire_coin = item.get('price')
+            price_csgoempire_usd = item.get('price')  # Já vem convertido em USD
             
-            if not market_hash_name or not price_csgoempire_coin:
+            if not market_hash_name or price_csgoempire_usd is None:
                 logger.debug("Dados insuficientes para calcular lucro")
                 return None
             
-            # Converte preço do CSGOEmpire de coin para dólar
-            price_csgoempire_usd = price_csgoempire_coin * self.coin_to_usd_factor
+            # O preço já vem convertido em USD do marketplace_scanner
+            # Não precisa mais converter de coin para dólar
             
             # Obtém preço do Buff163 em dólar
             price_buff163_usd = await self.supabase.get_buff163_price(market_hash_name)
@@ -75,7 +75,7 @@ class ProfitFilter:
             profit_percentage = ((price_buff163_usd - price_csgoempire_usd) / price_csgoempire_usd) * 100
             
             logger.debug(f"Lucro calculado: {profit_percentage:.2f}% para {item.get('name')}")
-            logger.debug(f"Preço CSGOEmpire: {price_csgoempire_coin} coin = ${price_csgoempire_usd:.2f}")
+            logger.debug(f"Preço CSGOEmpire: ${price_csgoempire_usd:.2f}")
             logger.debug(f"Preço Buff163: ${price_buff163_usd:.2f}")
             
             return profit_percentage

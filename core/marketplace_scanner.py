@@ -526,11 +526,12 @@ class MarketplaceScanner:
             auction_highest_bid = data.get('auction_highest_bid')
             auction_number_of_bids = data.get('auction_number_of_bids', 0)
             
-            # Converte preço de coin para USD (fator 0.614)
-            price_usd = purchase_price * self.settings.COIN_TO_USD_FACTOR
+            # Converte preço de centavos para USD (fator 0.614)
+            # CSGOEmpire retorna preços em centavos, não em coin
+            price_usd = (purchase_price / 100) * self.settings.COIN_TO_USD_FACTOR
             
             logger.info(f"💰 Item: {market_name}")
-            logger.info(f"   - Preço CSGOEmpire: {purchase_price} coin = ${price_usd:.2f}")
+            logger.info(f"   - Preço CSGOEmpire: {purchase_price} centavos = ${price_usd:.2f}")
             logger.info(f"   - Preço sugerido: ${suggested_price}")
             logger.info(f"   - Leilão termina: {auction_ends_at}")
             logger.info(f"   - Lances: {auction_number_of_bids}")
@@ -540,7 +541,7 @@ class MarketplaceScanner:
                 'name': market_name,
                 'market_hash_name': market_name,  # Usa market_name como fallback
                 'price': price_usd,  # Preço convertido para USD
-                'price_coin': purchase_price,  # Preço original em coin
+                'price_centavos': purchase_price,  # Preço original em centavos
                 'suggested_price': suggested_price,  # Preço sugerido
                 'condition': condition,
                 'float_value': float_value,

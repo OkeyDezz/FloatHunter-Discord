@@ -495,6 +495,11 @@ class MarketplaceScanner:
             if not item:
                 return
             
+            # Filtro de preço básico (antes de enriquecer com database)
+            if not self._check_basic_price_filter(item):
+                logger.debug(f"Item {item.get('name')} rejeitado pelo filtro de preço básico: ${item.get('price', 0):.2f}")
+                return
+            
             # Busca informações adicionais da database
             await self._enrich_item_data(item)
             
@@ -514,6 +519,38 @@ class MarketplaceScanner:
             logger.error(f"❌ Erro ao processar item: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _check_basic_price_filter(self, item: Dict) -> bool:
+        """
+        Filtro de preço básico aplicado antes de enriquecer com database.
+        Rejeita itens com preços muito baixos ou muito altos.
+        """
+        try:
+            price_usd = item.get('price')
+            if price_usd is None:
+                logger.debug(f"Item {item.get('name')} sem preço, rejeitando")
+                return False
+            
+            # Filtros de preço configurados
+            min_price = self.settings.MIN_PRICE
+            max_price = self.settings.MAX_PRICE
+            
+            # Verifica preço mínimo
+            if price_usd < min_price:
+                logger.debug(f"Item {item.get('name')} rejeitado: ${price_usd:.2f} < ${min_price:.2f} (MIN_PRICE)")
+                return False
+            
+            # Verifica preço máximo
+            if price_usd > max_price:
+                logger.debug(f"Item {item.get('name')} rejeitado: ${price_usd:.2f} > ${max_price:.2f} (MAX_PRICE)")
+                return False
+            
+            logger.debug(f"Item {item.get('name')} passou no filtro de preço básico: ${price_usd:.2f}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao verificar filtro de preço básico: {e}")
+            return False
     
     async def _enrich_item_data(self, item: Dict):
         """Enriquece o item com dados da database (preço Buff163 e liquidez)."""

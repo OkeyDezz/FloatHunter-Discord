@@ -24,6 +24,15 @@ class MarketplaceScanner:
     
     def __init__(self):
         self.settings = Settings()
+        
+        # Log das configurações carregadas
+        logger.info("🔧 Configurações carregadas:")
+        logger.info(f"   - MIN_PRICE: ${self.settings.MIN_PRICE:.2f}")
+        logger.info(f"   - MAX_PRICE: ${self.settings.MAX_PRICE:.2f}")
+        logger.info(f"   - MIN_PROFIT_PERCENTAGE: {self.settings.MIN_PROFIT_PERCENTAGE:.1f}%")
+        logger.info(f"   - MIN_LIQUIDITY_SCORE: {self.settings.MIN_LIQUIDITY_SCORE:.1f}")
+        logger.info(f"   - COIN_TO_USD_FACTOR: {self.settings.COIN_TO_USD_FACTOR}")
+        
         self.sio = socketio.AsyncClient()
         self.is_connected = False
         self.authenticated = False
@@ -535,17 +544,23 @@ class MarketplaceScanner:
             min_price = self.settings.MIN_PRICE
             max_price = self.settings.MAX_PRICE
             
+            # Log detalhado dos valores
+            logger.info(f"🔍 Filtro de preço básico para: {item.get('name')}")
+            logger.info(f"   - Preço do item: ${price_usd:.2f}")
+            logger.info(f"   - MIN_PRICE configurado: ${min_price:.2f}")
+            logger.info(f"   - MAX_PRICE configurado: ${max_price:.2f}")
+            
             # Verifica preço mínimo
             if price_usd < min_price:
-                logger.debug(f"Item {item.get('name')} rejeitado: ${price_usd:.2f} < ${min_price:.2f} (MIN_PRICE)")
+                logger.info(f"❌ Item {item.get('name')} REJEITADO: ${price_usd:.2f} < ${min_price:.2f} (MIN_PRICE)")
                 return False
             
             # Verifica preço máximo
             if price_usd > max_price:
-                logger.debug(f"Item {item.get('name')} rejeitado: ${price_usd:.2f} > ${max_price:.2f} (MAX_PRICE)")
+                logger.info(f"❌ Item {item.get('name')} REJEITADO: ${price_usd:.2f} > ${max_price:.2f} (MAX_PRICE)")
                 return False
             
-            logger.debug(f"Item {item.get('name')} passou no filtro de preço básico: ${price_usd:.2f}")
+            logger.info(f"✅ Item {item.get('name')} ACEITO no filtro de preço básico: ${price_usd:.2f}")
             return True
             
         except Exception as e:

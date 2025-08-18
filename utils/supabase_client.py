@@ -471,6 +471,10 @@ class SupabaseClient:
             if base_name.startswith('★'):
                 base_name = base_name[1:].strip()
             
+            # Remove parênteses da condição se presente
+            if condition and condition.startswith('(') and condition.endswith(')'):
+                condition = condition[1:-1].strip()
+            
             # Se é Souvenir, adiciona no início (sem espaço após |)
             if is_souvenir:
                 market_data_name = f"Souvenir|{base_name}"

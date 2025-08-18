@@ -97,6 +97,13 @@ class OpportunityBot:
     async def run(self):
         """Executa o bot."""
         try:
+            # Salva PID do processo para restart automático
+            import os
+            pid = os.getpid()
+            with open('bot.pid', 'w') as f:
+                f.write(str(pid))
+            logger.info(f"🆔 PID do processo salvo: {pid}")
+            
             # Inicia servidor de health check IMEDIATAMENTE
             logger.info("🚀 Iniciando servidor de health check...")
             health_server = HealthServer()
@@ -133,6 +140,13 @@ class OpportunityBot:
             
             # Shutdown graceful
             logger.info("🔄 Iniciando shutdown...")
+            
+            # Remove arquivo PID
+            try:
+                os.remove('bot.pid')
+                logger.info("🗑️ Arquivo PID removido")
+            except:
+                pass
             
             # Cancela scanner
             scanner_task.cancel()

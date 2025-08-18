@@ -39,15 +39,22 @@ class MarketplaceScanner:
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
         
+        # Sistema robusto de reconexão
+        self._last_data_received = time.time()
+        self._connection_start_time = None
+        self._reconnect_backoff = 1  # Delay inicial em segundos
+        self._max_reconnect_backoff = 300  # Delay máximo: 5 minutos
+        self._last_reconnect_attempt = 0
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 10  # Máximo de falhas consecutivas
+        self._force_restart_after = 3600  # Força restart após 1 hora sem conexão estável
+        self._last_stable_connection = time.time()
+        
         # Dados de autenticação
         self.user_id = None
         self.socket_token = None
         self.socket_signature = None
         self.user_model = None
-        
-        # Timestamps para monitoramento
-        self._last_data_received = time.time()
-        self._connection_start_time = None
         
         # Filtros
         self.profit_filter = ProfitFilter(
@@ -755,11 +762,13 @@ class MarketplaceScanner:
             # Verifica se o socket está conectado
             if not self.sio.connected:
                 logger.debug("❌ Socket.IO não está conectado")
+                await self._handle_connection_loss()
                 return False
             
             # Verifica se está autenticado
             if not self.authenticated:
                 logger.debug("❌ WebSocket não está autenticado")
+                await self._handle_connection_loss()
                 return False
             
             # Verifica se recebeu dados recentemente
@@ -767,6 +776,7 @@ class MarketplaceScanner:
                 time_since_data = time.time() - self._last_data_received
                 if time_since_data > 300:  # 5 minutos sem dados
                     logger.warning(f"⚠️ Sem dados recebidos há {time_since_data:.0f}s")
+                    await self._handle_connection_loss()
                     return False
             
             logger.debug("✅ Conexão WebSocket está saudável")
@@ -774,6 +784,7 @@ class MarketplaceScanner:
             
         except Exception as e:
             logger.error(f"❌ Erro ao verificar saúde da conexão: {e}")
+            await self._handle_connection_loss()
             return False
     
     async def _send_heartbeat(self):
@@ -786,9 +797,132 @@ class MarketplaceScanner:
         except Exception as e:
             logger.debug(f"⚠️ Erro ao enviar heartbeat: {e}")
     
+    async def _handle_connection_loss(self):
+        """
+        Gerencia perda de conexão de forma robusta.
+        Implementa backoff exponencial e fallback para restart.
+        """
+        try:
+            current_time = time.time()
+            time_since_data = current_time - self._last_data_received
+            time_since_stable = current_time - self._last_stable_connection
+            
+            logger.warning(f"⚠️ Sem dados recebidos há {time_since_data:.0f}s")
+            logger.warning(f"⚠️ Última conexão estável há {time_since_stable:.0f}s")
+            
+            # Verifica se deve forçar restart
+            if time_since_stable > self._force_restart_after:
+                logger.error(f"🚨 Forçando restart após {self._force_restart_after/3600:.1f}h sem conexão estável")
+                await self._force_restart()
+                return
+            
+            # Verifica se excedeu falhas consecutivas
+            if self._consecutive_failures >= self._max_consecutive_failures:
+                logger.error(f"🚨 Excedeu {self._max_consecutive_failures} falhas consecutivas, forçando restart")
+                await self._force_restart()
+                return
+            
+            # Calcula delay de reconexão com backoff exponencial
+            if current_time - self._last_reconnect_attempt < self._reconnect_backoff:
+                logger.info(f"⏳ Aguardando {self._reconnect_backoff:.0f}s antes da próxima tentativa...")
+                return
+            
+            # Tenta reconectar
+            logger.info(f"🔄 Tentativa de reconexão {self._consecutive_failures + 1}/{self._max_consecutive_failures}")
+            
+            if await self._attempt_reconnection():
+                # Sucesso na reconexão
+                self._consecutive_failures = 0
+                self._reconnect_backoff = 1  # Reset do backoff
+                self._last_stable_connection = current_time
+                logger.info("✅ Reconexão bem-sucedida!")
+            else:
+                # Falha na reconexão
+                self._consecutive_failures += 1
+                self._reconnect_backoff = min(self._reconnect_backoff * 2, self._max_reconnect_backoff)
+                self._last_reconnect_attempt = current_time
+                logger.warning(f"❌ Reconexão falhou. Próxima tentativa em {self._reconnect_backoff:.0f}s")
+                
+        except Exception as e:
+            logger.error(f"❌ Erro ao gerenciar perda de conexão: {e}")
+            self._consecutive_failures += 1
+    
+    async def _attempt_reconnection(self) -> bool:
+        """
+        Tenta reconectar ao WebSocket.
+        
+        Returns:
+            bool: True se reconexão bem-sucedida
+        """
+        try:
+            # Desconecta completamente
+            if self.sio.connected:
+                await self.sio.disconnect()
+            
+            # Reseta estado
+            self.is_connected = False
+            self.authenticated = False
+            
+            # Aguarda um pouco antes de tentar
+            await asyncio.sleep(2)
+            
+            # Tenta reconectar
+            if await self._connect_websocket():
+                # Aguarda autenticação
+                auth_timeout = 30  # 30 segundos para autenticar
+                start_time = time.time()
+                
+                while not self.authenticated and (time.time() - start_time) < auth_timeout:
+                    await asyncio.sleep(1)
+                
+                if self.authenticated:
+                    logger.info("✅ Reconexão e autenticação bem-sucedidas")
+                    return True
+                else:
+                    logger.warning("⚠️ Reconexão bem-sucedida, mas autenticação falhou")
+                    return False
+            else:
+                logger.warning("⚠️ Falha na reconexão")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Erro durante tentativa de reconexão: {e}")
+            return False
+    
+    async def _force_restart(self):
+        """
+        Força restart completo do scanner.
+        Último recurso quando reconexão falha repetidamente.
+        """
+        try:
+            logger.error("🚨 INICIANDO RESTART COMPLETO DO SCANNER")
+            
+            # Desconecta tudo
+            await self.disconnect()
+            
+            # Aguarda um pouco
+            await asyncio.sleep(10)
+            
+            # Reseta estado
+            self._consecutive_failures = 0
+            self._reconnect_backoff = 1
+            self._last_stable_connection = time.time()
+            
+            # Tenta reconectar do zero
+            if await self._connect_websocket():
+                logger.info("✅ Restart completo bem-sucedido!")
+            else:
+                logger.error("❌ Restart completo falhou")
+                
+        except Exception as e:
+            logger.error(f"❌ Erro durante restart completo: {e}")
+    
     def _update_last_data_received(self):
         """Atualiza timestamp do último dado recebido."""
         self._last_data_received = time.time()
+        # Se recebeu dados, considera conexão estável
+        if self.is_connected and self.authenticated:
+            self._last_stable_connection = time.time()
     
     async def _connect_websocket(self) -> bool:
         """Conecta ao WebSocket do CSGOEmpire seguindo exatamente a documentação."""

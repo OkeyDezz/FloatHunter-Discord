@@ -149,9 +149,14 @@ class MarketplaceScanner:
                     }, namespace='/trade')
                     logger.info("📤 Eventos permitidos configurados")
                     
-                    # Inscreve nos canais seguindo a documentação
-                    await self.sio.emit('subscribe', {'room': 'auctions'}, namespace='/trade')
-                    logger.info("📤 Inscrição em leilões enviada")
+                    # Inscreve em MÚLTIPLOS canais para capturar todos os tipos de itens
+                    channels = ['auctions', 'trading', 'marketplace', 'items', 'live']
+                    for channel in channels:
+                        try:
+                            await self.sio.emit('subscribe', {'room': channel}, namespace='/trade')
+                            logger.info(f"📤 Inscrição no canal '{channel}' enviada")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Falha ao inscrever no canal '{channel}': {e}")
                     
                     # Sincronização de tempo
                     await self.sio.emit('timesync', namespace='/trade')
@@ -161,8 +166,17 @@ class MarketplaceScanner:
                     logger.info("🔍 Configuração do WebSocket concluída:")
                     logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
                     logger.info("   - Eventos permitidos: new_item, updated_item, auction_update, auction_end, deleted_item")
-                    logger.info("   - Canal inscrito: auctions")
+                    logger.info("   - Canais inscritos: %s" % ', '.join(channels))
                     logger.info("   - Aguardando itens...")
+                    
+                    # Log especial para debug
+                    logger.info("🔍 MONITORAMENTO ATIVO:")
+                    logger.info("   - WebSocket: ✅ Conectado")
+                    logger.info("   - Autenticação: ✅ Confirmada")
+                    logger.info("   - Eventos: ✅ Permitidos")
+                    logger.info("   - Canais: ✅ Inscritos")
+                    logger.info("   - Filtros: ✅ Configurados")
+                    logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR ITENS!")
                     
                     self.authenticated = True
                     self._update_last_data_received()
@@ -284,6 +298,70 @@ class MarketplaceScanner:
                 self._update_last_data_received()
             except Exception as e:
                 logger.error(f"❌ Erro ao processar deleted_item: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        @self.sio.on('item_list', namespace='/trade')
+        async def on_item_list(data):
+            """Lista de itens (pode conter itens novos)."""
+            try:
+                if isinstance(data, list):
+                    logger.info(f"📋 LISTA DE ITENS RECEBIDA: {len(data)} itens")
+                    for i, item in enumerate(data):
+                        if isinstance(item, dict):
+                            item_name = item.get('market_name', item.get('name', 'Unknown'))
+                            item_id = item.get('id', 'Unknown')
+                            purchase_price = item.get('purchase_price', 'N/A')
+                            logger.info(f"   {i+1}. {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
+                            
+                            # Processa cada item da lista
+                            await self._process_item(item, 'item_list')
+                        else:
+                            logger.warning(f"   {i+1}. Item não é dicionário: {type(item)}")
+                elif isinstance(data, dict):
+                    item_name = data.get('market_name', data.get('name', 'Unknown'))
+                    item_id = data.get('id', 'Unknown')
+                    purchase_price = data.get('purchase_price', 'N/A')
+                    logger.info(f"📋 ITEM ÚNICO: {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
+                    await self._process_item(data, 'item_list')
+                else:
+                    logger.warning(f"⚠️ Dados inesperados para item_list: {type(data)} - {data}")
+                
+                self._update_last_data_received()
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar item_list: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        @self.sio.on('market_update', namespace='/trade')
+        async def on_market_update(data):
+            """Atualização de mercado (pode conter itens novos)."""
+            try:
+                if isinstance(data, list):
+                    logger.info(f"🏪 ATUALIZAÇÃO DE MERCADO: {len(data)} itens")
+                    for i, item in enumerate(data):
+                        if isinstance(item, dict):
+                            item_name = item.get('market_name', item.get('name', 'Unknown'))
+                            item_id = item.get('id', 'Unknown')
+                            purchase_price = item.get('purchase_price', 'N/A')
+                            logger.info(f"   {i+1}. {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
+                            
+                            # Processa cada item da lista
+                            await self._process_item(item, 'market_update')
+                        else:
+                            logger.warning(f"   {i+1}. Item não é dicionário: {type(item)}")
+                elif isinstance(data, dict):
+                    item_name = data.get('market_name', data.get('name', 'Unknown'))
+                    item_id = data.get('id', 'Unknown')
+                    purchase_price = data.get('purchase_price', 'N/A')
+                    logger.info(f"🏪 ATUALIZAÇÃO DE MERCADO: {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
+                    await self._process_item(data, 'market_update')
+                else:
+                    logger.warning(f"⚠️ Dados inesperados para market_update: {type(data)} - {data}")
+                
+                self._update_last_data_received()
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar market_update: {e}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
         
@@ -458,9 +536,14 @@ class MarketplaceScanner:
                 'price_max': self.settings.MAX_PRICE
             })
             
-            # Inscreve nos canais
-            await self.sio.emit('subscribe', {'room': 'trading'})
-            await self.sio.emit('subscribe', {'room': 'auctions'})
+            # Inscreve em MÚLTIPLOS canais para capturar todos os tipos de itens
+            channels = ['auctions', 'trading', 'marketplace', 'items', 'live']
+            for channel in channels:
+                try:
+                    await self.sio.emit('subscribe', {'room': channel}, namespace='/trade')
+                    logger.info(f"📤 Inscrição no canal '{channel}' enviada")
+                except Exception as e:
+                    logger.warning(f"⚠️ Falha ao inscrever no canal '{channel}': {e}")
             
             logger.info("✅ WebSocket configurado e autenticado")
             

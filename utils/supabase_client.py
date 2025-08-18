@@ -296,7 +296,7 @@ class SupabaseClient:
     
     async def get_liquidity_score_advanced(self, base_name: str, is_stattrak: bool, is_souvenir: bool, condition: str) -> Optional[float]:
         """
-        Obtém o score de liquidez para um item usando campos específicos.
+        Obtém o score de liquidez para um item usando o formato correto da tabela liquidity.
         
         Args:
             base_name: Nome base do item
@@ -317,23 +317,12 @@ class SupabaseClient:
             logger.info(f"   - Souvenir: {is_souvenir}")
             logger.info(f"   - Condição: {condition}")
             
-            # Constrói a query usando os campos corretos
-            query = self.client.table('liquidity').select('liquidity_score')
+            # Constrói o nome no formato da tabela liquidity
+            liquidity_name = self._build_liquidity_name(base_name, is_stattrak, is_souvenir, condition)
+            logger.info(f"🔍 Nome para busca na tabela liquidity: '{liquidity_name}'")
             
-            # Filtra por nome base
-            query = query.eq('name_base', base_name)
-            
-            # Filtra por StatTrak
-            query = query.eq('stattrak', is_stattrak)
-            
-            # Filtra por Souvenir
-            query = query.eq('souvenir', is_souvenir)
-            
-            # Filtra por condição
-            if condition:
-                query = query.eq('condition', condition)
-            
-            response = query.execute()
+            # Busca usando o nome construído
+            response = self.client.table('liquidity').select('liquidity_score').eq('item_key', liquidity_name).execute()
             
             logger.info(f"📊 Resposta da database: {response.data}")
             logger.info(f"📊 Número de registros encontrados: {len(response.data) if response.data else 0}")
@@ -344,6 +333,24 @@ class SupabaseClient:
                     logger.info(f"✅ Score de liquidez encontrado: {liquidity_score}")
                     return float(liquidity_score)
             
+            # Se não encontrou, tenta busca por similaridade
+            logger.info(f"🔍 Tentando busca por similaridade...")
+            response = self.client.table('liquidity').select('item_key, liquidity_score').ilike('item_key', f'%{base_name}%').limit(10).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"📊 Itens similares encontrados:")
+                for i, item in enumerate(response.data):
+                    logger.info(f"   {i+1}. '{item.get('item_key')}' - Liquidez: {item.get('liquidity_score')}")
+                
+                # Tenta encontrar o mais similar
+                for item in response.data:
+                    item_key = item.get('item_key', '')
+                    if self._is_similar_item(item_key, base_name, is_stattrak, is_souvenir, condition):
+                        liquidity_score = item.get('liquidity_score')
+                        if liquidity_score is not None:
+                            logger.info(f"✅ Score de liquidez encontrado por similaridade: {liquidity_score}")
+                            return float(liquidity_score)
+            
             logger.warning(f"⚠️ Nenhum score de liquidez encontrado para: {base_name}")
             return None
             
@@ -352,3 +359,87 @@ class SupabaseClient:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
+    
+    def _build_liquidity_name(self, base_name: str, is_stattrak: bool, is_souvenir: bool, condition: str) -> str:
+        """
+        Constrói o nome no formato da tabela liquidity.
+        
+        Args:
+            base_name: Nome base do item
+            is_stattrak: Se é StatTrak
+            is_souvenir: Se é Souvenir
+            condition: Condição do item
+            
+        Returns:
+            str: Nome no formato da tabela liquidity
+        """
+        try:
+            # Remove "★" se presente no início
+            if base_name.startswith('★'):
+                base_name = base_name[1:].strip()
+            
+            # Se é Souvenir, adiciona no início
+            if is_souvenir:
+                liquidity_name = f"Souvenir | {base_name}"
+            else:
+                liquidity_name = base_name
+            
+            # Se é StatTrak, adiciona antes da condição
+            if is_stattrak:
+                if condition:
+                    liquidity_name = f"{liquidity_name} | StatTrak | {condition}"
+                else:
+                    liquidity_name = f"{liquidity_name} | StatTrak"
+            elif condition:
+                liquidity_name = f"{liquidity_name} | {condition}"
+            
+            logger.info(f"🔧 Nome construído para liquidity: '{liquidity_name}'")
+            return liquidity_name
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao construir nome para liquidity: {e}")
+            return base_name
+    
+    def _is_similar_item(self, item_key: str, base_name: str, is_stattrak: bool, is_souvenir: bool, condition: str) -> bool:
+        """
+        Verifica se um item da tabela liquidity é similar ao item buscado.
+        
+        Args:
+            item_key: Nome do item na tabela liquidity
+            base_name: Nome base do item
+            is_stattrak: Se é StatTrak
+            is_souvenir: Se é Souvenir
+            condition: Condição do item
+            
+        Returns:
+            bool: True se os itens são similares
+        """
+        try:
+            # Remove "★" se presente
+            if item_key.startswith('★'):
+                item_key = item_key[1:].strip()
+            
+            # Verifica se contém o nome base
+            if base_name.lower() not in item_key.lower():
+                return False
+            
+            # Verifica StatTrak
+            has_stattrak = "StatTrak" in item_key
+            if is_stattrak != has_stattrak:
+                return False
+            
+            # Verifica Souvenir
+            has_souvenir = "Souvenir" in item_key
+            if is_souvenir != has_souvenir:
+                return False
+            
+            # Verifica condição (se especificada)
+            if condition:
+                if condition.lower() not in item_key.lower():
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao verificar similaridade: {e}")
+            return False

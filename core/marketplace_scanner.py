@@ -123,9 +123,9 @@ class MarketplaceScanner:
                     }, namespace='/trade')
                     logger.info("📤 Filtros básicos enviados")
                     
-                    # Configura eventos permitidos (todos os eventos de leilão)
+                    # Configura eventos permitidos (TODOS os eventos de leilão)
                     await self.sio.emit('allowedEvents', {
-                        'events': ['new_item', 'updated_item', 'auction_update', 'auction_end', 'deleted_item', 'timesync']
+                        'events': ['new_item', 'updated_item', 'auction_update', 'auction_end', 'deleted_item', 'timesync', 'trade_status']
                     }, namespace='/trade')
                     logger.info("📤 Eventos permitidos configurados")
                     
@@ -228,9 +228,21 @@ class MarketplaceScanner:
             try:
                 if isinstance(data, list):
                     logger.info(f"🗑️ ITEM REMOVIDO (lista): {len(data)} itens")
+                    # Tenta obter nomes dos itens removidos
+                    item_names = []
+                    for item_id in data:
+                        if isinstance(item_id, (int, str)):
+                            # Busca informações do item no cache ou faz log do ID
+                            item_names.append(f"ID:{item_id}")
+                        else:
+                            item_names.append(f"Tipo:{type(item_id)}")
+                    
+                    logger.info(f"📊 Itens removidos: {', '.join(item_names)}")
                     logger.info(f"📊 Dados completos: {data}")
                 elif isinstance(data, dict):
-                    logger.info(f"🗑️ ITEM REMOVIDO: {data.get('market_name', 'Unknown')}")
+                    item_name = data.get('market_name', data.get('name', 'Unknown'))
+                    item_id = data.get('id', 'Unknown')
+                    logger.info(f"🗑️ ITEM REMOVIDO: {item_name} (ID: {item_id})")
                     logger.info(f"📊 Dados completos: {data}")
                 else:
                     logger.info(f"🗑️ ITEM REMOVIDO: {type(data)} - {data}")
@@ -247,9 +259,22 @@ class MarketplaceScanner:
             try:
                 if isinstance(data, list):
                     logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO (lista): {len(data)} itens")
+                    # Tenta obter nomes dos itens
+                    item_names = []
+                    for item in data:
+                        if isinstance(item, dict):
+                            item_name = item.get('market_name', item.get('name', 'Unknown'))
+                            item_id = item.get('id', 'Unknown')
+                            item_names.append(f"{item_name} (ID: {item_id})")
+                        else:
+                            item_names.append(f"Tipo:{type(item)}")
+                    
+                    logger.info(f"📊 Itens atualizados: {', '.join(item_names)}")
                     logger.info(f"📊 Dados completos: {data}")
                 elif isinstance(data, dict):
-                    logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO: {data.get('market_name', 'Unknown')}")
+                    item_name = data.get('market_name', data.get('name', 'Unknown'))
+                    item_id = data.get('id', 'Unknown')
+                    logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO: {item_name} (ID: {item_id})")
                     logger.info(f"📊 Dados completos: {data}")
                 else:
                     logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO: {type(data)} - {data}")
@@ -266,9 +291,22 @@ class MarketplaceScanner:
             try:
                 if isinstance(data, list):
                     logger.info(f"🏁 LEILÃO FINALIZADO (lista): {len(data)} itens")
+                    # Tenta obter nomes dos itens
+                    item_names = []
+                    for item in data:
+                        if isinstance(item, dict):
+                            item_name = item.get('market_name', item.get('name', 'Unknown'))
+                            item_id = item.get('id', 'Unknown')
+                            item_names.append(f"{item_name} (ID: {item_id})")
+                        else:
+                            item_names.append(f"Tipo:{type(item)}")
+                    
+                    logger.info(f"📊 Leilões finalizados: {', '.join(item_names)}")
                     logger.info(f"📊 Dados completos: {data}")
                 elif isinstance(data, dict):
-                    logger.info(f"🏁 LEILÃO FINALIZADO: {data.get('market_name', 'Unknown')}")
+                    item_name = data.get('market_name', data.get('name', 'Unknown'))
+                    item_id = data.get('id', 'Unknown')
+                    logger.info(f"🏁 LEILÃO FINALIZADO: {item_name} (ID: {item_id})")
                     logger.info(f"📊 Dados completos: {data}")
                 else:
                     logger.info(f"🏁 LEILÃO FINALIZADO: {type(data)} - {data}")
@@ -280,16 +318,28 @@ class MarketplaceScanner:
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
         
+        @self.sio.on('trade_status', namespace='/trade')
+        async def on_trade_status(data):
+            """Status de trade."""
+            try:
+                if isinstance(data, list):
+                    logger.info(f"📊 STATUS DE TRADE (lista): {len(data)} itens")
+                    logger.info(f"📊 Dados completos: {data}")
+                elif isinstance(data, dict):
+                    logger.info(f"📊 STATUS DE TRADE: {data}")
+                else:
+                    logger.info(f"📊 STATUS DE TRADE: {type(data)} - {data}")
+                
+                self._update_last_data_received()
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar trade_status: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+        
         @self.sio.on('timesync', namespace='/trade')
         async def on_timesync(data):
             """Sincronização de tempo."""
             logger.debug(f"⏰ Timesync recebido: {data}")
-            self._update_last_data_received()
-        
-        @self.sio.on('trade_status', namespace='/trade')
-        async def on_trade_status(data):
-            """Status de trade."""
-            logger.debug(f"📊 Status de trade: {data}")
             self._update_last_data_received()
         
         @self.sio.on('error', namespace='/trade')

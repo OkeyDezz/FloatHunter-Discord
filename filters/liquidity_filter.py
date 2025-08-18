@@ -18,7 +18,8 @@ class LiquidityFilter:
     async def check(self, item: Dict) -> bool:
         """Verifica se um item tem boa liquidez."""
         try:
-            liquidity_score = await self.supabase.get_liquidity_score(item.get('market_hash_name'))
+            # Usa o score de liquidez já obtido pelo marketplace_scanner
+            liquidity_score = item.get('liquidity_score')
 
             if liquidity_score is None:
                 # Se não conseguir obter liquidez, REJEITA o item (não aceita por fallback)

@@ -387,20 +387,20 @@ class SupabaseClient:
             if base_name.startswith('★'):
                 base_name = base_name[1:].strip()
             
-            # Se é Souvenir, adiciona no início
+            # Se é Souvenir, adiciona no início (sem espaço após |)
             if is_souvenir:
-                liquidity_name = f"Souvenir | {base_name}"
+                liquidity_name = f"Souvenir|{base_name}"
             else:
                 liquidity_name = base_name
             
-            # Se é StatTrak, adiciona antes da condição
+            # Se é StatTrak, adiciona antes da condição (sem espaço após |)
             if is_stattrak:
                 if condition:
-                    liquidity_name = f"{liquidity_name} | StatTrak | {condition}"
+                    liquidity_name = f"{liquidity_name}|StatTrak|{condition}"
                 else:
-                    liquidity_name = f"{liquidity_name} | StatTrak"
+                    liquidity_name = f"{liquidity_name}|StatTrak"
             elif condition:
-                liquidity_name = f"{liquidity_name} | {condition}"
+                liquidity_name = f"{liquidity_name}|{condition}"
             
             logger.info(f"🔧 Nome construído para liquidity: '{liquidity_name}'")
             return liquidity_name
@@ -471,20 +471,20 @@ class SupabaseClient:
             if base_name.startswith('★'):
                 base_name = base_name[1:].strip()
             
-            # Se é Souvenir, adiciona no início
+            # Se é Souvenir, adiciona no início (sem espaço após |)
             if is_souvenir:
-                market_data_name = f"Souvenir | {base_name}"
+                market_data_name = f"Souvenir|{base_name}"
             else:
                 market_data_name = base_name
             
-            # Se é StatTrak, adiciona antes da condição
+            # Se é StatTrak, adiciona antes da condição (sem espaço após |)
             if is_stattrak:
                 if condition:
-                    market_data_name = f"{market_data_name} | StatTrak | {condition}"
+                    market_data_name = f"{market_data_name}|StatTrak|{condition}"
                 else:
-                    market_data_name = f"{market_data_name} | StatTrak"
+                    market_data_name = f"{market_data_name}|StatTrak"
             elif condition:
-                market_data_name = f"{market_data_name} | {condition}"
+                market_data_name = f"{market_data_name}|{condition}"
             
             logger.info(f"🔧 Nome construído para market_data: '{market_data_name}'")
             return market_data_name

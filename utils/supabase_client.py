@@ -258,13 +258,11 @@ class SupabaseClient:
             logger.info(f"   - Souvenir: {is_souvenir}")
             logger.info(f"   - Condição: {condition}")
             
-            # Constrói o nome no formato da tabela market_data
+            # Primeira tentativa: busca exata com nome construído
             market_data_name = self._build_market_data_name(base_name, is_stattrak, is_souvenir, condition)
             logger.info(f"🔍 Nome para busca na tabela market_data: '{market_data_name}'")
             
-            # Primeira tentativa: busca exata
             response = self.client.table('market_data').select('price_buff163').eq('item_key', market_data_name).execute()
-            
             logger.info(f"📊 Busca exata - Resposta: {response.data}")
             
             if response.data and len(response.data) > 0:
@@ -273,7 +271,7 @@ class SupabaseClient:
                     logger.info(f"✅ Preço Buff163 encontrado (busca exata): ${price_buff163}")
                     return float(price_buff163)
             
-            # Segunda tentativa: busca por similaridade (contains)
+            # Segunda tentativa: busca por similaridade (mesma lógica que funciona para liquidity)
             logger.info(f"🔍 Tentando busca por similaridade...")
             response = self.client.table('market_data').select('item_key, price_buff163').ilike('item_key', f'%{base_name}%').limit(10).execute()
             
@@ -293,6 +291,22 @@ class SupabaseClient:
                         if price_buff163 is not None:
                             logger.info(f"✅ Preço Buff163 encontrado por similaridade: ${price_buff163}")
                             return float(price_buff163)
+            
+            # Terceira tentativa: busca usando apenas o nome base (sem condição)
+            logger.info(f"🔍 Tentando busca apenas com nome base...")
+            response = self.client.table('market_data').select('item_key, price_buff163').ilike('item_key', f'%{base_name}%').limit(5).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"📊 Itens com nome base encontrados:")
+                for i, item in enumerate(response.data):
+                    logger.info(f"   {i+1}. '{item.get('item_key')}' - Preço: ${item.get('price_buff163')}")
+                
+                # Aceita o primeiro item encontrado (fallback)
+                first_item = response.data[0]
+                price_buff163 = first_item.get('price_buff163')
+                if price_buff163 is not None:
+                    logger.info(f"✅ Preço Buff163 encontrado por fallback (nome base): ${price_buff163}")
+                    return float(price_buff163)
             
             logger.warning(f"⚠️ Nenhum preço Buff163 encontrado para: {base_name}")
             return None

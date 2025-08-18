@@ -102,6 +102,10 @@ class MarketplaceScanner:
             self._connection_start_time = time.time()
             self.is_connected = True
             logger.info("✅ Status atualizado: is_connected = True")
+            
+            # Log de debug para eventos recebidos
+            logger.info("🔍 Monitorando eventos do WebSocket...")
+            logger.info("📡 Eventos esperados: new_item, updated_item, auction_update, auction_end, deleted_item")
         
         @self.sio.event(namespace='/trade')
         async def disconnect():
@@ -153,28 +157,27 @@ class MarketplaceScanner:
                     await self.sio.emit('timesync', namespace='/trade')
                     logger.info("📤 Timesync solicitado")
                     
-                    # Aguarda um pouco e envia heartbeat
-                    await asyncio.sleep(1)
-                    await self.sio.emit('ping', namespace='/trade')
-                    logger.info("📤 Ping enviado")
+                    # Log de debug para verificar configuração
+                    logger.info("🔍 Configuração do WebSocket concluída:")
+                    logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
+                    logger.info("   - Eventos permitidos: new_item, updated_item, auction_update, auction_end, deleted_item")
+                    logger.info("   - Canal inscrito: auctions")
+                    logger.info("   - Aguardando itens...")
                     
                     self.authenticated = True
-                    self.is_connected = True
-                    self._last_data_received = time.time()
-                    logger.info("✅ Autenticado em /trade e filtros configurados")
-                    logger.info("🎯 Bot pronto para receber itens de leilão!")
-                else:
-                    # Não autenticado - executa autenticação manual IMEDIATAMENTE
-                    logger.info("🆔 Usuário não autenticado no init - executando autenticação manual...")
+                    self._update_last_data_received()
                     
-                    # Executa autenticação manual
-                    if await self._authenticate_websocket():
-                        logger.info("✅ Autenticação manual bem-sucedida!")
-                    else:
-                        logger.error("❌ Falha na autenticação manual")
+                elif isinstance(data, dict) and not data.get('authenticated'):
+                    # Não autenticado - emite identify
+                    logger.warning(f"ℹ️ init sem authenticated=true - dados: {data}")
+                    if not self.authenticated:
+                        logger.info("🆔 Usuário não autenticado, emitindo identify...")
+                        await self._identify_and_configure()
+                else:
+                    logger.warning(f"⚠️ Evento init com formato inesperado: {data}")
                     
             except Exception as e:
-                logger.error(f"❌ Erro no init: {e}")
+                logger.error(f"❌ Erro ao processar evento init: {e}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
         
@@ -186,23 +189,33 @@ class MarketplaceScanner:
         
         @self.sio.on('new_item', namespace='/trade')
         async def on_new_item(data):
-            """Novo item disponível."""
+            """Novo item."""
             try:
-                # Trata tanto lista quanto dicionário
+                # Log detalhado para new_item (evento importante)
                 if isinstance(data, list):
-                    logger.info(f"🆕 NOVO ITEM RECEBIDO (lista): {len(data)} itens")
-                    logger.info(f"📊 Dados completos: {data}")
+                    logger.info(f"🆕 NOVOS ITENS RECEBIDOS: {len(data)} itens")
+                    for i, item in enumerate(data):
+                        if isinstance(item, dict):
+                            item_name = item.get('market_name', item.get('name', 'Unknown'))
+                            item_id = item.get('id', 'Unknown')
+                            purchase_price = item.get('purchase_price', 'N/A')
+                            logger.info(f"   {i+1}. {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
+                        else:
+                            logger.warning(f"   {i+1}. Item não é dicionário: {type(item)}")
+                    
                     # Processa cada item da lista
                     for item in data:
                         if isinstance(item, dict):
-                            logger.info(f"🎯 Processando item: {item.get('market_name', 'Unknown')} (ID: {item.get('id', 'Unknown')})")
+                            logger.info(f"🎯 Processando novo item: {item.get('market_name', 'Unknown')} (ID: {item.get('id', 'Unknown')})")
                             await self._process_item(item, 'new_item')
                         else:
                             logger.warning(f"⚠️ Item não é dicionário: {type(item)} - {item}")
                 elif isinstance(data, dict):
-                    logger.info(f"🆕 NOVO ITEM RECEBIDO: {data.get('market_name', 'Unknown')}")
-                    logger.info(f"📊 Dados completos: {data}")
-                    logger.info(f"🎯 Processando item: {data.get('market_name', 'Unknown')} (ID: {data.get('id', 'Unknown')})")
+                    item_name = data.get('market_name', data.get('name', 'Unknown'))
+                    item_id = data.get('id', 'Unknown')
+                    purchase_price = data.get('purchase_price', 'N/A')
+                    logger.info(f"🆕 NOVO ITEM: {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
+                    logger.info(f"🎯 Processando novo item: {item_name} (ID: {item_id})")
                     await self._process_item(data, 'new_item')
                 else:
                     logger.warning(f"⚠️ Dados inesperados para new_item: {type(data)} - {data}")
@@ -217,10 +230,18 @@ class MarketplaceScanner:
         async def on_updated_item(data):
             """Item atualizado."""
             try:
-                # Trata tanto lista quanto dicionário
+                # Log detalhado para updated_item (evento importante)
                 if isinstance(data, list):
-                    logger.info(f"🔄 ITEM ATUALIZADO (lista): {len(data)} itens")
-                    logger.info(f"📊 Dados completos: {data}")
+                    logger.info(f"🔄 ITENS ATUALIZADOS RECEBIDOS: {len(data)} itens")
+                    for i, item in enumerate(data):
+                        if isinstance(item, dict):
+                            item_name = item.get('market_name', item.get('name', 'Unknown'))
+                            item_id = item.get('id', 'Unknown')
+                            purchase_price = item.get('purchase_price', 'N/A')
+                            logger.info(f"   {i+1}. {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
+                        else:
+                            logger.warning(f"   {i+1}. Item não é dicionário: {type(item)}")
+                    
                     # Processa cada item da lista
                     for item in data:
                         if isinstance(item, dict):
@@ -229,9 +250,11 @@ class MarketplaceScanner:
                         else:
                             logger.warning(f"⚠️ Item não é dicionário: {type(item)} - {item}")
                 elif isinstance(data, dict):
-                    logger.info(f"🔄 ITEM ATUALIZADO: {data.get('market_name', 'Unknown')}")
-                    logger.info(f"📊 Dados completos: {data}")
-                    logger.info(f"🎯 Processando item atualizado: {data.get('market_name', 'Unknown')} (ID: {data.get('id', 'Unknown')})")
+                    item_name = data.get('market_name', data.get('name', 'Unknown'))
+                    item_id = data.get('id', 'Unknown')
+                    purchase_price = data.get('purchase_price', 'N/A')
+                    logger.info(f"🔄 ITEM ATUALIZADO: {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
+                    logger.info(f"🎯 Processando item atualizado: {item_name} (ID: {item_id})")
                     await self._process_item(data, 'updated_item')
                 else:
                     logger.warning(f"⚠️ Dados inesperados para updated_item: {type(data)} - {data}")
@@ -247,25 +270,16 @@ class MarketplaceScanner:
             """Item removido."""
             try:
                 if isinstance(data, list):
-                    logger.info(f"🗑️ ITEM REMOVIDO (lista): {len(data)} itens")
-                    # Tenta obter nomes dos itens removidos
-                    item_names = []
-                    for item_id in data:
-                        if isinstance(item_id, (int, str)):
-                            # Busca informações do item no cache ou faz log do ID
-                            item_names.append(f"ID:{item_id}")
-                        else:
-                            item_names.append(f"Tipo:{type(item_id)}")
-                    
-                    logger.info(f"📊 Itens removidos: {', '.join(item_names)}")
-                    logger.info(f"📊 Dados completos: {data}")
+                    # Log reduzido para deleted_item (não é oportunidade)
+                    if len(data) > 5:  # Só loga se muitos itens
+                        logger.info(f"🗑️ {len(data)} itens removidos do marketplace")
+                    else:
+                        logger.debug(f"🗑️ {len(data)} itens removidos")
                 elif isinstance(data, dict):
-                    item_name = data.get('market_name', data.get('name', 'Unknown'))
-                    item_id = data.get('id', 'Unknown')
-                    logger.info(f"🗑️ ITEM REMOVIDO: {item_name} (ID: {item_id})")
-                    logger.info(f"📊 Dados completos: {data}")
+                    # Log reduzido para item único
+                    logger.debug(f"🗑️ Item removido: {data.get('id', 'Unknown')}")
                 else:
-                    logger.info(f"🗑️ ITEM REMOVIDO: {type(data)} - {data}")
+                    logger.debug(f"🗑️ Item removido: {type(data)} - {data}")
                 
                 self._update_last_data_received()
             except Exception as e:
@@ -278,26 +292,13 @@ class MarketplaceScanner:
             """Atualização de leilão."""
             try:
                 if isinstance(data, list):
-                    logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO (lista): {len(data)} itens")
-                    # Tenta obter nomes dos itens
-                    item_names = []
-                    for item in data:
-                        if isinstance(item, dict):
-                            item_name = item.get('market_name', item.get('name', 'Unknown'))
-                            item_id = item.get('id', 'Unknown')
-                            item_names.append(f"{item_name} (ID: {item_id})")
-                        else:
-                            item_names.append(f"Tipo:{type(item)}")
-                    
-                    logger.info(f"📊 Itens atualizados: {', '.join(item_names)}")
-                    logger.info(f"📊 Dados completos: {data}")
+                    # Log reduzido para auction_update
+                    logger.debug(f"🏷️ {len(data)} atualizações de leilão recebidas")
                 elif isinstance(data, dict):
-                    item_name = data.get('market_name', data.get('name', 'Unknown'))
-                    item_id = data.get('id', 'Unknown')
-                    logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO: {item_name} (ID: {item_id})")
-                    logger.info(f"📊 Dados completos: {data}")
+                    # Log reduzido para atualização única
+                    logger.debug(f"🏷️ Atualização de leilão: {data.get('id', 'Unknown')}")
                 else:
-                    logger.info(f"🏷️ ATUALIZAÇÃO DE LEILÃO: {type(data)} - {data}")
+                    logger.debug(f"🏷️ Atualização de leilão: {type(data)} - {data}")
                 
                 self._update_last_data_received()
             except Exception as e:
@@ -310,29 +311,15 @@ class MarketplaceScanner:
             """Fim de leilão."""
             try:
                 if isinstance(data, list):
-                    logger.info(f"🏁 LEILÃO FINALIZADO (lista): {len(data)} itens")
-                    # Tenta obter nomes dos itens
-                    item_names = []
-                    for item in data:
-                        if isinstance(item, dict):
-                            item_name = item.get('market_name', item.get('name', 'Unknown'))
-                            item_id = item.get('id', 'Unknown')
-                            item_names.append(f"{item_name} (ID: {item_id})")
-                        else:
-                            item_names.append(f"Tipo:{type(item)}")
-                    
-                    logger.info(f"📊 Leilões finalizados: {', '.join(item_names)}")
-                    logger.info(f"📊 Dados completos: {data}")
+                    # Log reduzido para auction_end
+                    logger.debug(f"🏁 {len(data)} leilões finalizados")
                 elif isinstance(data, dict):
-                    item_name = data.get('market_name', data.get('name', 'Unknown'))
-                    item_id = data.get('id', 'Unknown')
-                    logger.info(f"🏁 LEILÃO FINALIZADO: {item_name} (ID: {item_id})")
-                    logger.info(f"📊 Dados completos: {data}")
+                    # Log reduzido para leilão único
+                    logger.debug(f"🏁 Leilão finalizado: {data.get('id', 'Unknown')}")
                 else:
-                    logger.info(f"🏁 LEILÃO FINALIZADO: {type(data)} - {data}")
+                    logger.debug(f"🏁 Leilão finalizado: {type(data)} - {data}")
                 
                 self._update_last_data_received()
-                # Não processa fim de leilão como oportunidade
             except Exception as e:
                 logger.error(f"❌ Erro ao processar auction_end: {e}")
                 import traceback
@@ -414,16 +401,32 @@ class MarketplaceScanner:
                 if event_name in ['identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'auction_end', 'timesync', 'trade_status', 'error', 'ping']:
                     return
                 
-                # Verifica se é uma lista ou dicionário
+                # Log especial para eventos importantes de debug
+                if event_name in ['connect', 'disconnect', 'connect_error']:
+                    logger.debug(f"📡 Evento de conexão: {event_name}")
+                    return
+                
+                # Log para eventos desconhecidos (pode ser importante)
                 if isinstance(data, list):
                     logger.info(f"📨 Evento não tratado: {event_name} - Lista com {len(data)} itens")
-                    self._update_last_data_received()
+                    # Log do primeiro item para debug
+                    if data and len(data) > 0:
+                        first_item = data[0]
+                        if isinstance(first_item, dict):
+                            logger.info(f"   Primeiro item: {first_item.get('market_name', first_item.get('name', 'Unknown'))} (ID: {first_item.get('id', 'Unknown')})")
+                        else:
+                            logger.info(f"   Primeiro item: {type(first_item)} - {first_item}")
                 elif isinstance(data, dict):
                     logger.info(f"📨 Evento não tratado: {event_name} - {type(data).__name__}")
-                    self._update_last_data_received()
+                    # Log dos dados para debug
+                    if 'market_name' in data or 'name' in data:
+                        item_name = data.get('market_name', data.get('name', 'Unknown'))
+                        item_id = data.get('id', 'Unknown')
+                        logger.info(f"   Item: {item_name} (ID: {item_id})")
                 else:
                     logger.info(f"📨 Evento não tratado: {event_name} - Tipo: {type(data).__name__}")
-                    self._update_last_data_received()
+                
+                self._update_last_data_received()
             except Exception as e:
                 logger.error(f"❌ Erro no handler genérico para evento {event_name}: {e}")
                 import traceback

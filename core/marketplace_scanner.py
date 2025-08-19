@@ -85,6 +85,10 @@ class MarketplaceScanner:
                 self._connection_start_time = time.time()
                 self.is_connected = True
                 logger.info("✅ Status atualizado: is_connected = True")
+                
+                # Configura automaticamente após conectar (sem depender do init)
+                logger.info("🔧 Configurando WebSocket automaticamente após conexão...")
+                await self._configure_websocket_after_connection()
             
             @self.sio.event(namespace='/trade')
             async def disconnect():
@@ -108,40 +112,8 @@ class MarketplaceScanner:
                 logger.info(f"📡 Evento init recebido: {data}")
                 try:
                     if isinstance(data, dict) and data.get('authenticated'):
-                        # Usuário autenticado - configura filtros
-                        logger.info("✅ Usuário já autenticado, configurando filtros...")
-                        
-                        # Configura APENAS eventos essenciais conforme documentação oficial
-                        await self.sio.emit('allowedEvents', {
-                            'events': ['new_item', 'deleted_item']
-                        }, namespace='/trade')
-                        logger.info("📤 Eventos permitidos configurados: new_item, deleted_item")
-                        
-                        # Configura filtros de preço
-                        await self.sio.emit('filters', {
-                            'price_min': self.settings.MIN_PRICE,
-                            'price_max': self.settings.MAX_PRICE
-                        }, namespace='/trade')
-                        logger.info("📤 Filtros de preço configurados")
-                        
-                        # Sincronização de tempo
-                        await self.sio.emit('timesync', namespace='/trade')
-                        logger.info("📤 Timesync solicitado")
-                        
-                        # Log de configuração
-                        logger.info("🔍 Configuração do WebSocket concluída:")
-                        logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
-                        logger.info("   - Eventos permitidos: new_item, deleted_item")
-                        logger.info("   - Aguardando itens...")
-                        
-                        # Log especial para debug
-                        logger.info("🔍 MONITORAMENTO ATIVO:")
-                        logger.info("   - WebSocket: ✅ Conectado")
-                        logger.info("   - Autenticação: ✅ Confirmada")
-                        logger.info("   - Eventos: ✅ Permitidos")
-                        logger.info("   - Filtros: ✅ Configurados")
-                        logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR ITENS!")
-                        
+                        # Usuário autenticado - marca como autenticado
+                        logger.info("✅ Usuário já autenticado via init")
                         self.authenticated = True
                         self._update_last_data_received()
                         
@@ -227,56 +199,8 @@ class MarketplaceScanner:
             logger.error(f"Traceback: {traceback.format_exc()}")
     
     async def _identify_and_configure(self):
-        """Identifica e configura filtros no WebSocket."""
-        try:
-            if not all([self.user_id, self.socket_token, self.socket_signature]):
-                logger.error("❌ Dados de autenticação incompletos")
-                return
-            
-            # Identificação
-            await self.sio.emit('identify', {
-                'uid': self.user_id,
-                'authorizationToken': self.socket_token,
-                'signature': self.socket_signature,
-                'uuid': str(uuid.uuid4())
-            })
-            
-            # Configura APENAS eventos essenciais conforme documentação oficial
-            await self.sio.emit('allowedEvents', {
-                'events': ['new_item', 'deleted_item']
-            })
-            logger.info("📤 Eventos permitidos configurados: new_item, deleted_item")
-            
-            # Configura filtros de preço
-            await self.sio.emit('filters', {
-                'price_min': self.settings.MIN_PRICE,
-                'price_max': self.settings.MAX_PRICE
-            })
-            logger.info("📤 Filtros de preço configurados")
-            
-            # Sincronização de tempo
-            await self.sio.emit('timesync', namespace='/trade')
-            logger.info("📤 Timesync solicitado")
-            
-            # Log de configuração
-            logger.info("🔍 Configuração do WebSocket concluída:")
-            logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
-            logger.info("   - Eventos permitidos: new_item, deleted_item")
-            logger.info("   - Aguardando itens...")
-            
-            # Log especial para debug
-            logger.info("🔍 MONITORAMENTO ATIVO:")
-            logger.info("   - WebSocket: ✅ Conectado")
-            logger.info("   - Autenticação: ✅ Confirmada")
-            logger.info("   - Eventos: ✅ Permitidos")
-            logger.info("   - Filtros: ✅ Configurados")
-            logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR ITENS!")
-            
-            self.authenticated = True
-            self._update_last_data_received()
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao configurar WebSocket: {e}")
+        """Método removido - configuração é feita automaticamente após conectar."""
+        pass
     
     async def _handle_new_item(self, data: Dict):
         """Processa novo item."""
@@ -1167,3 +1091,67 @@ class MarketplaceScanner:
             except Exception as e:
                 logger.error(f"❌ Erro no monitor de API: {e}")
                 await asyncio.sleep(60)
+
+    async def _configure_websocket_after_connection(self):
+        """Configura o WebSocket automaticamente após conectar."""
+        try:
+            logger.info("🔧 Configurando WebSocket após conexão...")
+            
+            # Aguarda um pouco para estabilizar a conexão
+            await asyncio.sleep(1)
+            
+            # Emite identify para autenticar
+            logger.info("🆔 Emitindo identify para autenticação...")
+            await self.sio.emit('identify', {
+                'uid': self.user_id,
+                'authorizationToken': self.socket_token,
+                'signature': self.socket_signature,
+                'uuid': str(uuid.uuid4())
+            }, namespace='/trade')
+            
+            # Aguarda um pouco para a autenticação
+            await asyncio.sleep(2)
+            
+            # Configura APENAS eventos essenciais conforme documentação oficial
+            logger.info("📤 Configurando eventos permitidos...")
+            await self.sio.emit('allowedEvents', {
+                'events': ['new_item', 'deleted_item']
+            }, namespace='/trade')
+            logger.info("📤 Eventos permitidos configurados: new_item, deleted_item")
+            
+            # Configura filtros de preço
+            logger.info("📤 Configurando filtros de preço...")
+            await self.sio.emit('filters', {
+                'price_min': self.settings.MIN_PRICE,
+                'price_max': self.settings.MAX_PRICE
+            }, namespace='/trade')
+            logger.info("📤 Filtros de preço configurados")
+            
+            # Sincronização de tempo
+            logger.info("📤 Solicitando timesync...")
+            await self.sio.emit('timesync', namespace='/trade')
+            logger.info("📤 Timesync solicitado")
+            
+            # Marca como autenticado e configurado
+            self.authenticated = True
+            
+            # Log de configuração
+            logger.info("🔍 Configuração do WebSocket concluída:")
+            logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
+            logger.info("   - Eventos permitidos: new_item, deleted_item")
+            logger.info("   - Aguardando itens...")
+            
+            # Log especial para debug
+            logger.info("🔍 MONITORAMENTO ATIVO:")
+            logger.info("   - WebSocket: ✅ Conectado")
+            logger.info("   - Autenticação: ✅ Confirmada")
+            logger.info("   - Eventos: ✅ Permitidos")
+            logger.info("   - Filtros: ✅ Configurados")
+            logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR ITENS!")
+            
+            self._update_last_data_received()
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao configurar WebSocket após conexão: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")

@@ -1,6 +1,7 @@
 """
 Main entry point para o Opportunity Bot.
 Bot simples e direto para capturar oportunidades no CSGOEmpire.
+Inclui health server integrado para Railway.
 """
 import asyncio
 import logging
@@ -21,10 +22,32 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+async def start_health_server():
+    """Inicia o servidor de health check em background."""
+    try:
+        from health_server import HealthServer
+        
+        server = HealthServer()
+        if await server.start():
+            logger.info("✅ Health server iniciado com sucesso!")
+            return server
+        else:
+            logger.error("❌ Falha ao iniciar health server")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Erro ao iniciar health server: {e}")
+        return None
+
 async def main():
     """Função principal do bot."""
     try:
         logger.info("🚀 Iniciando Opportunity Bot...")
+        
+        # Inicia health server em background
+        health_server = await start_health_server()
+        if health_server:
+            logger.info("🌐 Health server rodando em background")
         
         # Importa o scanner
         from core.marketplace_scanner import MarketplaceScanner
@@ -35,7 +58,7 @@ async def main():
         # Configura signal handlers para shutdown graceful
         def signal_handler(signum, frame):
             logger.info(f"📡 Sinal {signum} recebido, iniciando shutdown...")
-            asyncio.create_task(shutdown(scanner))
+            asyncio.create_task(shutdown(scanner, health_server))
         
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -50,13 +73,18 @@ async def main():
         logger.error(f"Traceback: {traceback.format_exc()}")
         sys.exit(1)
 
-async def shutdown(scanner):
+async def shutdown(scanner, health_server=None):
     """Shutdown graceful do bot."""
     try:
         logger.info("🛑 Iniciando shutdown graceful...")
         
         # Desconecta do WebSocket
         await scanner.disconnect()
+        
+        # Para o health server se estiver rodando
+        if health_server:
+            await health_server.stop()
+            logger.info("🛑 Health server parado")
         
         logger.info("✅ Shutdown concluído com sucesso")
         sys.exit(0)

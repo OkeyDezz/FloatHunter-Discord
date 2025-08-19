@@ -150,7 +150,12 @@ class MarketplaceScanner:
                     logger.info("📤 Eventos permitidos configurados")
                     
                     # Inscreve em MÚLTIPLOS canais para capturar todos os tipos de itens
-                    channels = ['auctions', 'trading', 'marketplace', 'items', 'live']
+                    channels = [
+                        'auctions', 'trading', 'marketplace', 'items', 'live',
+                        'market', 'auction', 'trade', 'item', 'live_auctions',
+                        'live_trading', 'live_market', 'live_items', 'all', 'global',
+                        'csgo', 'csgoempire', 'empire', 'bot', 'stream'
+                    ]
                     for channel in channels:
                         try:
                             await self.sio.emit('subscribe', {'room': channel}, namespace='/trade')
@@ -444,69 +449,56 @@ class MarketplaceScanner:
             self.is_connected = False
             self.authenticated = False
         
-        # Handler genérico para capturar todos os eventos (mesmo do bot principal)
+        # Handler genérico para TODOS os eventos (debug e captura)
         @self.sio.on('*', namespace='/trade')
-        async def catch_all(event_name, data):
-            """Captura todos os eventos para debug."""
+        async def on_any_event(event, data):
+            """Captura TODOS os eventos para debug e processamento."""
             try:
-                # Log especial para o evento init
-                if event_name == 'init':
-                    logger.info(f"🎯 EVENTO INIT CAPTURADO: {event_name}")
-                    logger.info(f"📡 Dados do init: {data}")
-                    # Chama o handler específico do init
-                    await on_init(data)
-                    return
+                # Log do evento recebido
+                logger.info(f"📡 EVENTO RECEBIDO: {event}")
+                logger.info(f"📊 Tipo: {type(data)}")
                 
-                # Log especial para o evento connect
-                if event_name == 'connect':
-                    logger.info(f"🔌 EVENTO CONNECT CAPTURADO: {event_name}")
-                    logger.info(f"📡 Dados do connect: {data}")
-                    return
+                # Se for lista com itens, processa
+                if isinstance(data, list) and len(data) > 0:
+                    logger.info(f"📋 LISTA RECEBIDA em '{event}': {len(data)} itens")
+                    
+                    # Verifica se parece com lista de itens
+                    if isinstance(data[0], dict) and 'id' in data[0]:
+                        logger.info(f"🎯 ITENS DETECTADOS em '{event}': {len(data)} itens")
+                        
+                        # Processa cada item da lista
+                        for i, item in enumerate(data):
+                            if isinstance(item, dict) and 'id' in item:
+                                item_name = item.get('market_name', item.get('name', 'Unknown'))
+                                item_id = item.get('id', 'Unknown')
+                                logger.info(f"   {i+1}. {item_name} (ID: {item_id})")
+                                await self._process_item(item, event)
+                            else:
+                                logger.warning(f"   {i+1}. Item inválido: {type(item)}")
+                    
+                    # Se for lista de IDs (deleted_item)
+                    elif isinstance(data[0], (int, str)):
+                        logger.debug(f"🗑️ Lista de IDs em '{event}': {len(data)} itens")
                 
-                # Log especial para o evento disconnect
-                if event_name == 'disconnect':
-                    logger.info(f"🔌 EVENTO DISCONNECT CAPTURADO: {event_name}")
-                    logger.info(f"📡 Dados do disconnect: {data}")
-                    return
-                
-                # Log especial para o evento connect_error
-                if event_name == 'connect_error':
-                    logger.error(f"❌ EVENTO CONNECT_ERROR CAPTURADO: {event_name}")
-                    logger.error(f"📡 Dados do connect_error: {data}")
-                    return
-                
-                # Ignora eventos que já temos handlers específicos
-                if event_name in ['identify', 'new_item', 'updated_item', 'deleted_item', 'auction_update', 'auction_end', 'timesync', 'trade_status', 'error', 'ping']:
-                    return
-                
-                # Log especial para eventos importantes de debug
-                if event_name in ['connect', 'disconnect', 'connect_error']:
-                    logger.debug(f"📡 Evento de conexão: {event_name}")
-                    return
-                
-                # Log para eventos desconhecidos (pode ser importante)
-                if isinstance(data, list):
-                    logger.info(f"📨 Evento não tratado: {event_name} - Lista com {len(data)} itens")
-                    # Log do primeiro item para debug
-                    if data and len(data) > 0:
-                        first_item = data[0]
-                        if isinstance(first_item, dict):
-                            logger.info(f"   Primeiro item: {first_item.get('market_name', first_item.get('name', 'Unknown'))} (ID: {first_item.get('id', 'Unknown')})")
-                        else:
-                            logger.info(f"   Primeiro item: {type(first_item)} - {first_item}")
+                # Se for item único, processa
                 elif isinstance(data, dict):
-                    logger.info(f"📨 Evento não tratado: {event_name} - {type(data).__name__}")
-                    # Log dos dados para debug
-                    if 'market_name' in data or 'name' in data:
+                    if 'id' in data:
                         item_name = data.get('market_name', data.get('name', 'Unknown'))
                         item_id = data.get('id', 'Unknown')
-                        logger.info(f"   Item: {item_name} (ID: {item_id})")
-                else:
-                    logger.info(f"📨 Evento não tratado: {event_name} - Tipo: {type(data).__name__}")
+                        logger.info(f"🎯 ITEM ÚNICO em '{event}': {item_name} (ID: {item_id})")
+                        await self._process_item(data, event)
+                    else:
+                        logger.debug(f"📊 Dados em '{event}': {data}")
                 
+                # Se for outro tipo de dado
+                else:
+                    logger.debug(f"📊 Dados em '{event}': {type(data)} - {data}")
+                
+                # Atualiza timestamp de último dado recebido
                 self._update_last_data_received()
+                
             except Exception as e:
-                logger.error(f"❌ Erro no handler genérico para evento {event_name}: {e}")
+                logger.error(f"❌ Erro ao processar evento '{event}': {e}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
     
@@ -537,7 +529,12 @@ class MarketplaceScanner:
             })
             
             # Inscreve em MÚLTIPLOS canais para capturar todos os tipos de itens
-            channels = ['auctions', 'trading', 'marketplace', 'items', 'live']
+            channels = [
+                'auctions', 'trading', 'marketplace', 'items', 'live',
+                'market', 'auction', 'trade', 'item', 'live_auctions',
+                'live_trading', 'live_market', 'live_items', 'all', 'global',
+                'csgo', 'csgoempire', 'empire', 'bot', 'stream'
+            ]
             for channel in channels:
                 try:
                     await self.sio.emit('subscribe', {'room': channel}, namespace='/trade')
@@ -660,17 +657,16 @@ class MarketplaceScanner:
             logger.error(f"❌ Erro ao verificar filtro de preço básico: {e}")
             return False
     
-    async def _enrich_item_data(self, item: Dict):
-        """Enriquece o item com dados da database (preço Buff163 e liquidez)."""
+    async def _enrich_item_data(self, item: Dict) -> None:
+        """Enriquece o item com dados da database."""
         try:
-            # Usa os campos parseados do item
             base_name = item.get('base_name')
             is_stattrak = item.get('is_stattrak', False)
             is_souvenir = item.get('is_souvenir', False)
-            condition = item.get('condition', '')
+            condition = item.get('condition')
             
             if not base_name:
-                logger.warning("⚠️ Sem base_name para enriquecer item")
+                logger.warning(f"⚠️ Item sem base_name: {item.get('name', 'Unknown')}")
                 return
             
             logger.info(f"🔍 Enriquecendo item: {base_name}")
@@ -678,26 +674,21 @@ class MarketplaceScanner:
             logger.info(f"   - Souvenir: {is_souvenir}")
             logger.info(f"   - Condição: {condition}")
             
-            # Busca preço Buff163 usando os campos corretos
+            # Busca preço Buff163 (UMA ÚNICA consulta)
             price_buff163 = await self.supabase.get_buff163_price_advanced(
-                base_name=base_name,
-                is_stattrak=is_stattrak,
-                is_souvenir=is_souvenir,
-                condition=condition
+                base_name, is_stattrak, is_souvenir, condition
             )
             
-            if price_buff163:
+            if price_buff163 is not None:
                 item['price_buff163'] = price_buff163
                 logger.info(f"💰 Preço Buff163 encontrado: ${price_buff163:.2f}")
             else:
                 logger.warning(f"⚠️ Preço Buff163 não encontrado para: {base_name}")
+                item['price_buff163'] = None
             
-            # Busca score de liquidez usando os campos corretos
+            # Busca score de liquidez (UMA ÚNICA consulta)
             liquidity_score = await self.supabase.get_liquidity_score_advanced(
-                base_name=base_name,
-                is_stattrak=is_stattrak,
-                is_souvenir=is_souvenir,
-                condition=condition
+                base_name, is_stattrak, is_souvenir, condition
             )
             
             if liquidity_score is not None:
@@ -705,6 +696,7 @@ class MarketplaceScanner:
                 logger.info(f"💧 Score de liquidez encontrado: {liquidity_score:.1f}")
             else:
                 logger.warning(f"⚠️ Score de liquidez não encontrado para: {base_name}")
+                item['liquidity_score'] = None
                 
         except Exception as e:
             logger.error(f"❌ Erro ao enriquecer item: {e}")

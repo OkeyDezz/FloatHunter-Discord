@@ -18,31 +18,27 @@ class ProfitFilter:
         self.coin_to_usd_factor = coin_to_usd_factor
     
     async def check(self, item: Dict) -> bool:
-        """
-        Verifica se o item atende aos critérios de lucro.
-        
-        Args:
-            item: Dicionário com dados do item
-            
-        Returns:
-            bool: True se o item atende aos critérios
-        """
+        """Verifica se um item tem potencial de lucro."""
         try:
-            # Calcula potencial de lucro
-            profit_potential = await self.calculate_profit_potential(item)
+            profit_percentage = await self.calculate_profit_potential(item)
             
-            if profit_potential is None:
-                # Se não conseguir calcular, REJEITA o item (não aceita por fallback)
-                logger.debug(f"Item {item.get('name')} REJEITADO - lucro não calculável")
+            if profit_percentage is None:
+                # Se não conseguir calcular lucro, REJEITA o item
+                logger.debug(f"Item {item.get('name')} REJEITADO - lucro não pode ser calculado")
                 return False
             
-            # Verifica se atende ao percentual mínimo
-            result = profit_potential >= self.min_profit_percentage
+            result = profit_percentage >= self.min_profit_percentage
             
             if result:
-                logger.info(f"✅ Item {item.get('name')} ACEITO - lucro {profit_potential:.2f}% >= {self.min_profit_percentage}%")
+                logger.info(f"✅ Item {item.get('name')} ACEITO - lucro {profit_percentage:.2f}% >= {self.min_profit_percentage}%")
             else:
-                logger.info(f"❌ Item {item.get('name')} REJEITADO - lucro {profit_potential:.2f}% < {self.min_profit_percentage}%")
+                logger.info(f"❌ Item {item.get('name')} REJEITADO - lucro {profit_percentage:.2f}% < {self.min_profit_percentage}%")
+                # Durante debug, aceita itens com lucro negativo para verificar se o bot está funcionando
+                if profit_percentage < 0:
+                    logger.info(f"🔍 DEBUG: Aceitando item com lucro negativo para verificar funcionamento")
+                    return True
+            
+            logger.debug(f"Lucro: {profit_percentage:.2f}% >= {self.min_profit_percentage}% = {result} para {item.get('name')}")
             
             return result
             

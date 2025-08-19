@@ -157,65 +157,11 @@ class MarketplaceScanner:
                 except Exception as e:
                     logger.error(f"❌ Erro ao processar new_item: {e}")
             
-            @self.sio.on('deleted_item', namespace='/trade')
-            async def on_deleted_item(data):
-                """Item removido."""
-                try:
-                    if isinstance(data, list):
-                        logger.debug(f"🗑️ {len(data)} itens removidos")
-                    else:
-                        logger.debug(f"🗑️ Item removido")
-                    
-                    self._update_last_data_received()
-                except Exception as e:
-                    logger.error(f"❌ Erro ao processar deleted_item: {e}")
+
             
-            @self.sio.on('updated_item', namespace='/trade')
-            async def on_updated_item(data):
-                """Item atualizado."""
-                try:
-                    logger.info(f"🔄 ITEM ATUALIZADO: {type(data)}")
-                    
-                    if isinstance(data, list):
-                        logger.info(f"📋 Lista com {len(data)} itens atualizados")
-                        for i, item in enumerate(data):
-                            if isinstance(item, dict):
-                                item_name = item.get('market_name', item.get('name', f'Item {i+1}'))
-                                item_id = item.get('id', 'Unknown')
-                                logger.info(f"   🔄 {i+1}. {item_name} (ID: {item_id})")
-                                await self._process_item(item, 'updated_item')
-                    elif isinstance(data, dict):
-                        logger.info(f"📋 Item único atualizado")
-                        await self._process_item(data, 'updated_item')
-                    
-                    self._update_last_data_received()
-                except Exception as e:
-                    logger.error(f"❌ Erro ao processar updated_item: {e}")
+
             
-            @self.sio.on('auction_update', namespace='/trade')
-            async def on_auction_update(data):
-                """Atualização de leilão."""
-                try:
-                    logger.info(f"🔔 LEILÃO ATUALIZADO: {type(data)}")
-                    
-                    if isinstance(data, list):
-                        logger.info(f"📋 Lista com {len(data)} leilões atualizados")
-                        for i, item in enumerate(data):
-                            if isinstance(item, dict):
-                                item_name = item.get('market_name', item.get('name', f'Item {i+1}'))
-                                item_id = item.get('id', 'Unknown')
-                                logger.info(f"   📦 {i+1}. {item_name} (ID: {item_id})")
-                                await self._process_item(item, 'auction_update')
-                    elif isinstance(data, dict):
-                        logger.info(f"📋 Leilão único atualizado")
-                        item_name = data.get('market_name', data.get('name', 'Unknown'))
-                        item_id = data.get('id', 'Unknown')
-                        logger.info(f"   📦 {item_name} (ID: {item_id})")
-                        await self._process_item(data, 'auction_update')
-                    
-                    self._update_last_data_received()
-                except Exception as e:
-                    logger.error(f"❌ Erro ao processar auction_update: {e}")
+
             
             @self.sio.on('err', namespace='/trade')
             async def on_error(data):
@@ -227,17 +173,7 @@ class MarketplaceScanner:
                 except Exception as e:
                     logger.error(f"❌ Erro ao processar evento de erro: {e}")
             
-            @self.sio.on('timesync', namespace='/trade')
-            async def on_timesync(data):
-                """Sincronização de tempo."""
-                logger.debug(f"⏰ Timesync: {data}")
-                self._update_last_data_received()
-            
-            @self.sio.on('updated_seller_online_status', namespace='/trade')
-            async def on_updated_seller_online_status(data):
-                """Status online do vendedor (apenas debug silencioso)."""
-                logger.debug(f"👤 Status vendedor atualizado: {len(data) if isinstance(data, list) else 1} itens")
-                self._update_last_data_received()
+
             
             # Handler genérico para capturar TODOS os eventos (debug)
             @self.sio.on('*', namespace='/trade')
@@ -245,7 +181,7 @@ class MarketplaceScanner:
                 """Captura TODOS os eventos para debug."""
                 try:
                     # Log apenas eventos que não temos handlers específicos
-                    excluded_events = ['new_item', 'deleted_item', 'updated_item', 'auction_update', 'err', 'timesync', 'init', 'updated_seller_online_status']
+                    excluded_events = ['new_item', 'err', 'init']
                     
                     if event not in excluded_events:
                         logger.info(f"📡 EVENTO NÃO TRATADO: {event} - Tipo: {type(data)}")
@@ -1098,6 +1034,9 @@ class MarketplaceScanner:
             # Aguarda um pouco para estabilizar a conexão
             await asyncio.sleep(1)
             
+            # Aguarda um pouco para estabilizar antes de emitir identify
+            await asyncio.sleep(2)
+            
             # Emite identify para autenticar
             logger.info("🆔 Emitindo identify para autenticação...")
             await self.sio.emit('identify', {
@@ -1107,30 +1046,24 @@ class MarketplaceScanner:
                 'uuid': str(uuid.uuid4())
             }, namespace='/trade')
             
-            # NÃO aguarda resposta do init - configura diretamente
-            logger.info("⚡ Configurando filtros e eventos diretamente após identify...")
+            # Aguarda autenticação ser processada
+            logger.info("⏳ Aguardando processamento da autenticação...")
+            await asyncio.sleep(3)
             
-            # Configura eventos essenciais conforme documentação oficial
-            logger.info("📤 Configurando eventos permitidos...")
+            # Configura APENAS evento new_item
+            logger.info("📤 Configurando APENAS evento new_item...")
             await self.sio.emit('allowedEvents', {
-                'events': ['new_item', 'deleted_item', 'updated_item', 'auction_update']
+                'events': ['new_item']
             }, namespace='/trade')
-            logger.info("📤 Eventos permitidos configurados: new_item, deleted_item, updated_item, auction_update")
+            logger.info("📤 Evento permitido: new_item")
             
-            # Configura filtros de preço e tipo
-            logger.info("📤 Configurando filtros de preço e tipo...")
+            # Configura filtros básicos
+            logger.info("📤 Configurando filtros básicos...")
             await self.sio.emit('filters', {
                 'price_min': self.settings.MIN_PRICE,
-                'price_max': self.settings.MAX_PRICE,
-                'auction': 1,  # Apenas itens de leilão
-                'active': 1   # Apenas itens ativos
+                'price_max': self.settings.MAX_PRICE
             }, namespace='/trade')
-            logger.info("📤 Filtros configurados: preço, leilão e status ativo")
-            
-            # Sincronização de tempo
-            logger.info("📤 Solicitando timesync...")
-            await self.sio.emit('timesync', namespace='/trade')
-            logger.info("📤 Timesync solicitado")
+            logger.info("📤 Filtros configurados: preço apenas")
             
             # Marca como autenticado e configurado
             self.authenticated = True
@@ -1141,18 +1074,16 @@ class MarketplaceScanner:
             # Log de configuração
             logger.info("🔍 Configuração do WebSocket concluída:")
             logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
-            logger.info("   - Apenas leilões: ✅ Ativo")
-            logger.info("   - Eventos permitidos: new_item, deleted_item, updated_item, auction_update")
-            logger.info("   - Aguardando itens...")
+            logger.info("   - Evento único: new_item")
+            logger.info("   - Aguardando novos itens...")
             
             # Log especial para debug
             logger.info("🔍 MONITORAMENTO ATIVO:")
             logger.info("   - WebSocket: ✅ Conectado")
             logger.info("   - Autenticação: ✅ Confirmada")
-            logger.info("   - Eventos: ✅ Permitidos")
+            logger.info("   - Evento: ✅ new_item")
             logger.info("   - Filtros: ✅ Configurados")
-            logger.info("   - Tipo: 🎯 APENAS LEILÕES")
-            logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR ITENS!")
+            logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR NOVOS ITENS!")
             
             self._update_last_data_received()
             

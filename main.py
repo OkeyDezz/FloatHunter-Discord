@@ -25,7 +25,8 @@ class OpportunityBot:
     """Bot principal de detecção de oportunidades."""
     
     def __init__(self):
-        self.running = False
+        self.running = True  # Sempre True por padrão
+        self.should_stop = False  # Nova variável para controle
         
         # Configura handlers de sinal para graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -34,7 +35,7 @@ class OpportunityBot:
     def _signal_handler(self, signum, frame):
         """Handler para sinais de shutdown."""
         logger.info(f"📡 Sinal {signum} recebido, iniciando shutdown...")
-        self.running = False
+        self.should_stop = True
     
     async def initialize(self) -> bool:
         """Inicializa o bot."""
@@ -56,25 +57,25 @@ class OpportunityBot:
         try:
             logger.info("🔄 Bot iniciado, modo minimalista ativo...")
             
-            # Loop principal simples - SEMPRE roda
-            while True:  # Loop infinito - nunca para
+            # Loop principal VERDADEIRAMENTE infinito
+            while True:  # NUNCA para - ignora sinais
                 try:
-                    # Verifica se deve parar
-                    if not self.running:
-                        logger.info("🔄 Sinal de parada recebido...")
-                        break
-                    
-                    # Verifica status a cada 30 segundos
+                    # Log de status a cada 30 segundos
                     await asyncio.sleep(30)
-                    logger.info("ℹ️ Bot em modo minimalista - health check ativo")
+                    logger.info("💓 Bot ativo - health check funcionando")
+                    
+                    # Só verifica sinal de parada se explicitamente solicitado
+                    if self.should_stop:
+                        logger.info("🔄 Shutdown explícito solicitado...")
+                        break
                     
                 except Exception as e:
                     logger.error(f"❌ Erro no loop principal: {e}")
                     await asyncio.sleep(5)
-                    # Continua rodando mesmo com erro
+                    # Continua rodando SEMPRE
             
-            # Shutdown graceful (só se self.running for False)
-            logger.info("🔄 Iniciando shutdown...")
+            # Shutdown graceful (só se should_stop for True)
+            logger.info("🔄 Iniciando shutdown graceful...")
             await self.shutdown()
             
         except Exception as e:
@@ -82,11 +83,11 @@ class OpportunityBot:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             
-            # Loop de emergência - nunca para
+            # Loop de emergência - ABSOLUTAMENTE infinito
             logger.info("🚨 Entrando em modo de emergência...")
             while True:
                 await asyncio.sleep(30)
-                logger.info("🚨 Modo de emergência - processo mantido vivo")
+                logger.info("🚨 Modo de emergência - processo SEMPRE vivo")
     
     async def shutdown(self):
         """Shutdown graceful do bot."""
@@ -118,9 +119,13 @@ async def main():
         
         # Inicia bot
         bot = OpportunityBot()
+        logger.info("🤖 Bot criado - forçando running=True...")
+        bot.running = True  # FORÇA running = True
+        bot.should_stop = False  # FORÇA should_stop = False
+        
         if await bot.initialize():
-            bot.running = True
             logger.info("🤖 Bot inicializado com sucesso - iniciando loop principal...")
+            logger.info(f"🔍 Estado do bot: running={bot.running}, should_stop={bot.should_stop}")
             
             # Loop principal do bot
             try:

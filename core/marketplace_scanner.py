@@ -77,6 +77,88 @@ class MarketplaceScanner:
         try:
             logger.info("🔧 Configurando handlers de eventos...")
             
+            # Handlers de conexão ESSENCIAIS
+            @self.sio.event(namespace='/trade')
+            async def connect():
+                """Conectado ao namespace /trade."""
+                logger.info("🔌 Conectado ao namespace /trade")
+                self._connection_start_time = time.time()
+                self.is_connected = True
+                logger.info("✅ Status atualizado: is_connected = True")
+            
+            @self.sio.event(namespace='/trade')
+            async def disconnect():
+                """Desconectado do namespace /trade."""
+                logger.info("🔌 Desconectado do namespace /trade")
+                self.is_connected = False
+                self.authenticated = False
+                logger.info("✅ Status atualizado: is_connected = False, authenticated = False")
+            
+            @self.sio.event(namespace='/trade')
+            async def connect_error(data):
+                """Erro de conexão."""
+                logger.error(f"❌ Erro de conexão WebSocket: {data}")
+                self.is_connected = False
+                self.authenticated = False
+            
+            # Handler ESSENCIAL para evento init (autenticação)
+            @self.sio.on('init', namespace='/trade')
+            async def on_init(data):
+                """Evento de inicialização (ESSENCIAL para autenticação)."""
+                logger.info(f"📡 Evento init recebido: {data}")
+                try:
+                    if isinstance(data, dict) and data.get('authenticated'):
+                        # Usuário autenticado - configura filtros
+                        logger.info("✅ Usuário já autenticado, configurando filtros...")
+                        
+                        # Configura APENAS eventos essenciais conforme documentação oficial
+                        await self.sio.emit('allowedEvents', {
+                            'events': ['new_item', 'deleted_item']
+                        }, namespace='/trade')
+                        logger.info("📤 Eventos permitidos configurados: new_item, deleted_item")
+                        
+                        # Configura filtros de preço
+                        await self.sio.emit('filters', {
+                            'price_min': self.settings.MIN_PRICE,
+                            'price_max': self.settings.MAX_PRICE
+                        }, namespace='/trade')
+                        logger.info("📤 Filtros de preço configurados")
+                        
+                        # Sincronização de tempo
+                        await self.sio.emit('timesync', namespace='/trade')
+                        logger.info("📤 Timesync solicitado")
+                        
+                        # Log de configuração
+                        logger.info("🔍 Configuração do WebSocket concluída:")
+                        logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
+                        logger.info("   - Eventos permitidos: new_item, deleted_item")
+                        logger.info("   - Aguardando itens...")
+                        
+                        # Log especial para debug
+                        logger.info("🔍 MONITORAMENTO ATIVO:")
+                        logger.info("   - WebSocket: ✅ Conectado")
+                        logger.info("   - Autenticação: ✅ Confirmada")
+                        logger.info("   - Eventos: ✅ Permitidos")
+                        logger.info("   - Filtros: ✅ Configurados")
+                        logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR ITENS!")
+                        
+                        self.authenticated = True
+                        self._update_last_data_received()
+                        
+                    elif isinstance(data, dict) and not data.get('authenticated'):
+                        # Não autenticado - emite identify
+                        logger.warning(f"ℹ️ init sem authenticated=true - dados: {data}")
+                        if not self.authenticated:
+                            logger.info("🆔 Usuário não autenticado, emitindo identify...")
+                            await self._identify_and_configure()
+                    else:
+                        logger.warning(f"⚠️ Evento init com formato inesperado: {data}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Erro ao processar evento init: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+            
             # APENAS eventos essenciais conforme documentação oficial
             @self.sio.on('new_item', namespace='/trade')
             async def on_new_item(data):
@@ -122,7 +204,7 @@ class MarketplaceScanner:
                 """Captura TODOS os eventos para debug."""
                 try:
                     # Log apenas eventos que não temos handlers específicos
-                    if event not in ['new_item', 'deleted_item', 'timesync']:
+                    if event not in ['new_item', 'deleted_item', 'timesync', 'init']:
                         logger.info(f"📡 EVENTO NÃO TRATADO: {event} - Tipo: {type(data)}")
                         
                         # Se for lista com itens, pode ser importante

@@ -1,6 +1,9 @@
 # Railway Procfile
-# ULTRA SIMPLE MODE - SEMPRE funciona
-worker: python3 start_ultra_simple.py
+# ROBUST BOT MODE - Funcionalidade completa + Robustez máxima
+worker: python3 start_robust_bot.py
+
+# ULTRA SIMPLE MODE - SEMPRE funciona (apenas health check)
+# worker: python3 start_ultra_simple.py
 
 # Opção 1: Apenas health server (mais rápido para Railway)
 # worker: python3 start_health.py

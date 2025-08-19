@@ -29,12 +29,12 @@ class Settings:
         
         # Configurações do Discord
         self.DISCORD_WEBHOOK_URL: str = os.getenv('DISCORD_WEBHOOK_URL', '')
-        self.DISCORD_BOT_TOKEN: Optional[str] = os.getenv('DISCORD_BOT_TOKEN')
-        self.DISCORD_CHANNEL_ID: Optional[str] = os.getenv('DISCORD_CHANNEL_ID')
+        self.DISCORD_BOT_TOKEN: Optional[str] = os.getenv('DISCORD_TOKEN')  # Railway usa DISCORD_TOKEN
+        self.DISCORD_CHANNEL_ID: Optional[str] = os.getenv('CSGOEMPIRE_CHANNEL_ID')  # Railway usa CSGOEMPIRE_CHANNEL_ID
         
         # Configurações do Supabase
         self.SUPABASE_URL: str = os.getenv('SUPABASE_URL', '')
-        self.SUPABASE_KEY: str = os.getenv('SUPABASE_KEY', '')
+        self.SUPABASE_KEY: str = os.getenv('SUPABASE_ANON_KEY', '')  # Railway usa SUPABASE_ANON_KEY
         
         # Filtros de preço (USD)
         self.MIN_PRICE: float = float(os.getenv('MIN_PRICE', '1.0'))
@@ -63,14 +63,16 @@ class Settings:
         print(f"🔍 Debug - Variáveis de ambiente:")
         print(f"  CSGOEMPIRE_API_KEY: {'✅ Definida' if self.CSGOEMPIRE_API_KEY else '❌ Ausente'}")
         print(f"  DISCORD_WEBHOOK_URL: {'✅ Definida' if self.DISCORD_WEBHOOK_URL else '❌ Ausente'}")
+        print(f"  DISCORD_TOKEN: {'✅ Definida' if self.DISCORD_BOT_TOKEN else '❌ Ausente'}")
+        print(f"  CSGOEMPIRE_CHANNEL_ID: {'✅ Definida' if self.DISCORD_CHANNEL_ID else '❌ Ausente'}")
         print(f"  SUPABASE_URL: {'✅ Definida' if self.SUPABASE_URL else '❌ Ausente'}")
-        print(f"  SUPABASE_KEY: {'✅ Definida' if self.SUPABASE_KEY else '❌ Ausente'}")
+        print(f"  SUPABASE_ANON_KEY: {'✅ Definida' if self.SUPABASE_KEY else '❌ Ausente'}")
         
         required_settings = [
             ('CSGOEMPIRE_API_KEY', self.CSGOEMPIRE_API_KEY),
-            ('DISCORD_WEBHOOK_URL', self.DISCORD_WEBHOOK_URL),
+            ('DISCORD_WEBHOOK_URL ou DISCORD_TOKEN', self.DISCORD_WEBHOOK_URL or self.DISCORD_BOT_TOKEN),
             ('SUPABASE_URL', self.SUPABASE_URL),
-            ('SUPABASE_KEY', self.SUPABASE_KEY)
+            ('SUPABASE_ANON_KEY', self.SUPABASE_KEY)
         ]
         
         missing_settings = [name for name, value in required_settings if not value]

@@ -18,13 +18,18 @@ class DiscordPoster:
     def __init__(self):
         self.settings = Settings()
         self.webhook_url = self.settings.DISCORD_WEBHOOK_URL
+        self.bot_token = self.settings.DISCORD_BOT_TOKEN
+        self.channel_id = self.settings.DISCORD_CHANNEL_ID
         
-        if not self.webhook_url:
-            logger.warning("⚠️ Discord webhook URL não configurada")
+        if not self.webhook_url and not self.bot_token:
+            logger.warning("⚠️ Discord webhook URL ou bot token não configurado")
+        
+        if not self.channel_id:
+            logger.warning("⚠️ Discord channel ID não configurado")
     
     async def post_opportunity(self, item: Dict) -> bool:
         """
-        Posta uma oportunidade no Discord usando webhook.
+        Posta uma oportunidade no Discord usando webhook ou bot token.
         
         Args:
             item: Dicionário com dados do item
@@ -33,8 +38,12 @@ class DiscordPoster:
             bool: True se enviou com sucesso, False caso contrário
         """
         try:
-            if not self.webhook_url:
-                logger.error("❌ Discord webhook URL não configurada")
+            if not self.webhook_url and not self.bot_token:
+                logger.error("❌ Discord webhook URL ou bot token não configurado")
+                return False
+            
+            if not self.channel_id:
+                logger.error("❌ Discord channel ID não configurado")
                 return False
             
             # Prepara os dados do embed
@@ -47,22 +56,69 @@ class DiscordPoster:
                 "avatar_url": "https://i.imgur.com/4M34hi2.png"
             }
             
-            # Envia via webhook
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.webhook_url, json=payload) as response:
-                    if response.status == 204:
-                        logger.info(f"✅ Oportunidade enviada para Discord: {item.get('name', 'Unknown')}")
-                        return True
-                    else:
-                        logger.error(f"❌ Erro ao enviar para Discord: {response.status}")
-                        error_text = await response.text()
-                        logger.error(f"❌ Resposta: {error_text}")
-                        return False
+            # Envia via webhook ou bot token
+            if self.webhook_url:
+                # Usa webhook
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(self.webhook_url, json=payload) as response:
+                        if response.status == 204:
+                            logger.info(f"✅ Oportunidade enviada para Discord via webhook: {item.get('name', 'Unknown')}")
+                            return True
+                        else:
+                            logger.error(f"❌ Erro ao enviar via webhook: {response.status}")
+                            error_text = await response.text()
+                            logger.error(f"❌ Resposta: {error_text}")
+                            return False
+            else:
+                # Usa bot token
+                return await self._send_via_bot_token(payload, item)
                         
         except Exception as e:
             logger.error(f"❌ Erro ao enviar para Discord: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
+    
+    async def _send_via_bot_token(self, payload: Dict, item: Dict) -> bool:
+        """
+        Envia mensagem via bot token do Discord.
+        
+        Args:
+            payload: Payload da mensagem
+            item: Dados do item
+            
+        Returns:
+            bool: True se enviou com sucesso, False caso contrário
+        """
+        try:
+            # Remove campos específicos do webhook
+            bot_payload = {
+                "embeds": payload["embeds"],
+                "content": f"🎯 **Nova Oportunidade Encontrada!**\n{item.get('name', 'Unknown')}"
+            }
+            
+            # Headers para bot token
+            headers = {
+                "Authorization": f"Bot {self.bot_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # URL da API do Discord
+            url = f"https://discord.com/api/v10/channels/{self.channel_id}/messages"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=bot_payload, headers=headers) as response:
+                    if response.status == 200:
+                        logger.info(f"✅ Oportunidade enviada para Discord via bot: {item.get('name', 'Unknown')}")
+                        return True
+                    else:
+                        logger.error(f"❌ Erro ao enviar via bot: {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"❌ Resposta: {error_text}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ Erro ao enviar via bot token: {e}")
             return False
     
     def _create_embed(self, item: Dict) -> Dict:

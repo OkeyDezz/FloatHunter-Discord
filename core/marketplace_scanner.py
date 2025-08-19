@@ -72,423 +72,77 @@ class MarketplaceScanner:
         # Configura eventos
         self._setup_socket_events()
     
-    def _setup_socket_events(self):
-        """Configura os handlers de eventos do Socket.IO."""
-        
-        @self.sio.event
-        async def connect():
-            """Evento de conexão."""
-            logger.info("🔌 Conectado ao WebSocket do CSGOEmpire")
-            self._connection_start_time = time.time()
-        
-        @self.sio.event
-        async def disconnect():
-            """Evento de desconexão."""
-            logger.info("🔌 Desconectado do WebSocket do CSGOEmpire")
-            self.is_connected = False
-            self.authenticated = False
-        
-        @self.sio.event
-        async def connect_error(data):
-            """Erro de conexão."""
-            logger.error(f"❌ Erro de conexão WebSocket: {data}")
-            self.is_connected = False
-            self.authenticated = False
-        
-        @self.sio.event(namespace='/trade')
-        async def connect():
-            """Conectado ao namespace /trade."""
-            logger.info("🔌 Conectado ao namespace /trade")
-            self._connection_start_time = time.time()
-            self.is_connected = True
-            logger.info("✅ Status atualizado: is_connected = True")
+    async def _setup_socket_events(self):
+        """Configura os handlers de eventos do WebSocket."""
+        try:
+            logger.info("🔧 Configurando handlers de eventos...")
             
-            # Log de debug para eventos recebidos
-            logger.info("🔍 Monitorando eventos do WebSocket...")
-            logger.info("📡 Eventos esperados: new_item, updated_item, auction_update, auction_end, deleted_item")
-        
-        @self.sio.event(namespace='/trade')
-        async def disconnect():
-            """Desconectado do namespace /trade."""
-            logger.info("🔌 Desconectado do namespace /trade")
-            self.is_connected = False
-            self.authenticated = False
-            logger.info("✅ Status atualizado: is_connected = False, authenticated = False")
-        
-        @self.sio.on('identify', namespace='/trade')
-        async def on_identify_response(data):
-            """Resposta do evento identify."""
-            logger.info(f"🆔 Resposta do identify recebida: {data}")
-            self._update_last_data_received()
-        
-        @self.sio.on('init', namespace='/trade')
-        async def on_init(data):
-            """Evento de inicialização (mesmo do bot principal)."""
-            logger.info(f"📡 Evento init recebido: {data}")
-            try:
-                # Verifica se é uma lista (alguns eventos retornam listas)
-                if isinstance(data, list):
-                    logger.warning(f"⚠️ Evento init retornou lista: {data}")
-                    return
-                
-                if isinstance(data, dict) and data.get('authenticated'):
-                    # Já autenticado - emite eventos necessários
-                    logger.info("✅ Usuário já autenticado, configurando filtros...")
+            # APENAS eventos essenciais conforme documentação oficial
+            @self.sio.on('new_item', namespace='/trade')
+            async def on_new_item(data):
+                """Novo item disponível."""
+                try:
+                    logger.info(f"🆕 NOVO ITEM RECEBIDO: {type(data)}")
                     
-                    # Configura filtros seguindo exatamente a documentação
-                    await self.sio.emit('filters', {
-                        "enabled": True,
-                        "price_min": self.settings.MIN_PRICE,
-                        "price_max": self.settings.MAX_PRICE
-                    }, namespace='/trade')
-                    logger.info("📤 Filtros básicos enviados")
-                    
-                    # Configura eventos permitidos (TODOS os eventos de leilão)
-                    await self.sio.emit('allowedEvents', {
-                        'events': ['new_item', 'updated_item', 'auction_update', 'auction_end', 'deleted_item', 'timesync', 'trade_status']
-                    }, namespace='/trade')
-                    logger.info("📤 Eventos permitidos configurados")
-                    
-                    # Inscreve em MÚLTIPLOS canais para capturar todos os tipos de itens
-                    channels = [
-                        'auctions', 'trading', 'marketplace', 'items', 'live',
-                        'market', 'auction', 'trade', 'item', 'live_auctions',
-                        'live_trading', 'live_market', 'live_items', 'all', 'global',
-                        'csgo', 'csgoempire', 'empire', 'bot', 'stream'
-                    ]
-                    for channel in channels:
-                        try:
-                            await self.sio.emit('subscribe', {'room': channel}, namespace='/trade')
-                            logger.info(f"📤 Inscrição no canal '{channel}' enviada")
-                        except Exception as e:
-                            logger.warning(f"⚠️ Falha ao inscrever no canal '{channel}': {e}")
-                    
-                    # Sincronização de tempo
-                    await self.sio.emit('timesync', namespace='/trade')
-                    logger.info("📤 Timesync solicitado")
-                    
-                    # Log de debug para verificar configuração
-                    logger.info("🔍 Configuração do WebSocket concluída:")
-                    logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
-                    logger.info("   - Eventos permitidos: new_item, updated_item, auction_update, auction_end, deleted_item")
-                    logger.info("   - Canais inscritos: %s" % ', '.join(channels))
-                    logger.info("   - Aguardando itens...")
-                    
-                    # Log especial para debug
-                    logger.info("🔍 MONITORAMENTO ATIVO:")
-                    logger.info("   - WebSocket: ✅ Conectado")
-                    logger.info("   - Autenticação: ✅ Confirmada")
-                    logger.info("   - Eventos: ✅ Permitidos")
-                    logger.info("   - Canais: ✅ Inscritos")
-                    logger.info("   - Filtros: ✅ Configurados")
-                    logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR ITENS!")
-                    
-                    self.authenticated = True
-                    self._update_last_data_received()
-                    
-                elif isinstance(data, dict) and not data.get('authenticated'):
-                    # Não autenticado - emite identify
-                    logger.warning(f"ℹ️ init sem authenticated=true - dados: {data}")
-                    if not self.authenticated:
-                        logger.info("🆔 Usuário não autenticado, emitindo identify...")
-                        await self._identify_and_configure()
-                else:
-                    logger.warning(f"⚠️ Evento init com formato inesperado: {data}")
-                    
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar evento init: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        @self.sio.on('ping', namespace='/trade')
-        async def on_ping(data):
-            """Resposta do ping."""
-            logger.info(f"🏓 Pong recebido: {data}")
-            self._update_last_data_received()
-        
-        @self.sio.on('new_item', namespace='/trade')
-        async def on_new_item(data):
-            """Novo item."""
-            try:
-                # Log detalhado para new_item (evento importante)
-                if isinstance(data, list):
-                    logger.info(f"🆕 NOVOS ITENS RECEBIDOS: {len(data)} itens")
-                    for i, item in enumerate(data):
-                        if isinstance(item, dict):
-                            item_name = item.get('market_name', item.get('name', 'Unknown'))
-                            item_id = item.get('id', 'Unknown')
-                            purchase_price = item.get('purchase_price', 'N/A')
-                            logger.info(f"   {i+1}. {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
-                        else:
-                            logger.warning(f"   {i+1}. Item não é dicionário: {type(item)}")
-                    
-                    # Processa cada item da lista
-                    for item in data:
-                        if isinstance(item, dict):
-                            logger.info(f"🎯 Processando novo item: {item.get('market_name', 'Unknown')} (ID: {item.get('id', 'Unknown')})")
-                            await self._process_item(item, 'new_item')
-                        else:
-                            logger.warning(f"⚠️ Item não é dicionário: {type(item)} - {item}")
-                elif isinstance(data, dict):
-                    item_name = data.get('market_name', data.get('name', 'Unknown'))
-                    item_id = data.get('id', 'Unknown')
-                    purchase_price = data.get('purchase_price', 'N/A')
-                    logger.info(f"🆕 NOVO ITEM: {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
-                    logger.info(f"🎯 Processando novo item: {item_name} (ID: {item_id})")
-                    await self._process_item(data, 'new_item')
-                else:
-                    logger.warning(f"⚠️ Dados inesperados para new_item: {type(data)} - {data}")
-                
-                self._update_last_data_received()
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar new_item: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        @self.sio.on('updated_item', namespace='/trade')
-        async def on_updated_item(data):
-            """Item atualizado."""
-            try:
-                # Log detalhado para updated_item (evento importante)
-                if isinstance(data, list):
-                    logger.info(f"🔄 ITENS ATUALIZADOS RECEBIDOS: {len(data)} itens")
-                    for i, item in enumerate(data):
-                        if isinstance(item, dict):
-                            item_name = item.get('market_name', item.get('name', 'Unknown'))
-                            item_id = item.get('id', 'Unknown')
-                            purchase_price = item.get('purchase_price', 'N/A')
-                            logger.info(f"   {i+1}. {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
-                        else:
-                            logger.warning(f"   {i+1}. Item não é dicionário: {type(item)}")
-                    
-                    # Processa cada item da lista
-                    for item in data:
-                        if isinstance(item, dict):
-                            logger.info(f"🎯 Processando item atualizado: {item.get('market_name', 'Unknown')} (ID: {item.get('id', 'Unknown')})")
-                            await self._process_item(item, 'updated_item')
-                        else:
-                            logger.warning(f"⚠️ Item não é dicionário: {type(item)} - {item}")
-                elif isinstance(data, dict):
-                    item_name = data.get('market_name', data.get('name', 'Unknown'))
-                    item_id = data.get('id', 'Unknown')
-                    purchase_price = data.get('purchase_price', 'N/A')
-                    logger.info(f"🔄 ITEM ATUALIZADO: {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
-                    logger.info(f"🎯 Processando item atualizado: {item_name} (ID: {item_id})")
-                    await self._process_item(data, 'updated_item')
-                else:
-                    logger.warning(f"⚠️ Dados inesperados para updated_item: {type(data)} - {data}")
-                
-                self._update_last_data_received()
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar updated_item: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        @self.sio.on('deleted_item', namespace='/trade')
-        async def on_deleted_item(data):
-            """Item removido."""
-            try:
-                if isinstance(data, list):
-                    # Log reduzido para deleted_item (não é oportunidade)
-                    if len(data) > 5:  # Só loga se muitos itens
-                        logger.info(f"🗑️ {len(data)} itens removidos do marketplace")
-                    else:
-                        logger.debug(f"🗑️ {len(data)} itens removidos")
-                elif isinstance(data, dict):
-                    # Log reduzido para item único
-                    logger.debug(f"🗑️ Item removido: {data.get('id', 'Unknown')}")
-                else:
-                    logger.debug(f"🗑️ Item removido: {type(data)} - {data}")
-                
-                self._update_last_data_received()
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar deleted_item: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        @self.sio.on('item_list', namespace='/trade')
-        async def on_item_list(data):
-            """Lista de itens (pode conter itens novos)."""
-            try:
-                if isinstance(data, list):
-                    logger.info(f"📋 LISTA DE ITENS RECEBIDA: {len(data)} itens")
-                    for i, item in enumerate(data):
-                        if isinstance(item, dict):
-                            item_name = item.get('market_name', item.get('name', 'Unknown'))
-                            item_id = item.get('id', 'Unknown')
-                            purchase_price = item.get('purchase_price', 'N/A')
-                            logger.info(f"   {i+1}. {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
-                            
-                            # Processa cada item da lista
-                            await self._process_item(item, 'item_list')
-                        else:
-                            logger.warning(f"   {i+1}. Item não é dicionário: {type(item)}")
-                elif isinstance(data, dict):
-                    item_name = data.get('market_name', data.get('name', 'Unknown'))
-                    item_id = data.get('id', 'Unknown')
-                    purchase_price = data.get('purchase_price', 'N/A')
-                    logger.info(f"📋 ITEM ÚNICO: {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
-                    await self._process_item(data, 'item_list')
-                else:
-                    logger.warning(f"⚠️ Dados inesperados para item_list: {type(data)} - {data}")
-                
-                self._update_last_data_received()
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar item_list: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        @self.sio.on('market_update', namespace='/trade')
-        async def on_market_update(data):
-            """Atualização de mercado (pode conter itens novos)."""
-            try:
-                if isinstance(data, list):
-                    logger.info(f"🏪 ATUALIZAÇÃO DE MERCADO: {len(data)} itens")
-                    for i, item in enumerate(data):
-                        if isinstance(item, dict):
-                            item_name = item.get('market_name', item.get('name', 'Unknown'))
-                            item_id = item.get('id', 'Unknown')
-                            purchase_price = item.get('purchase_price', 'N/A')
-                            logger.info(f"   {i+1}. {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
-                            
-                            # Processa cada item da lista
-                            await self._process_item(item, 'market_update')
-                        else:
-                            logger.warning(f"   {i+1}. Item não é dicionário: {type(item)}")
-                elif isinstance(data, dict):
-                    item_name = data.get('market_name', data.get('name', 'Unknown'))
-                    item_id = data.get('id', 'Unknown')
-                    purchase_price = data.get('purchase_price', 'N/A')
-                    logger.info(f"🏪 ATUALIZAÇÃO DE MERCADO: {item_name} (ID: {item_id}, Preço: {purchase_price} centavos)")
-                    await self._process_item(data, 'market_update')
-                else:
-                    logger.warning(f"⚠️ Dados inesperados para market_update: {type(data)} - {data}")
-                
-                self._update_last_data_received()
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar market_update: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        @self.sio.on('auction_update', namespace='/trade')
-        async def on_auction_update(data):
-            """Atualização de leilão."""
-            try:
-                if isinstance(data, list):
-                    # Log reduzido para auction_update
-                    logger.debug(f"🏷️ {len(data)} atualizações de leilão recebidas")
-                elif isinstance(data, dict):
-                    # Log reduzido para atualização única
-                    logger.debug(f"🏷️ Atualização de leilão: {data.get('id', 'Unknown')}")
-                else:
-                    logger.debug(f"🏷️ Atualização de leilão: {type(data)} - {data}")
-                
-                self._update_last_data_received()
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar auction_update: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        @self.sio.on('auction_end', namespace='/trade')
-        async def on_auction_end(data):
-            """Fim de leilão."""
-            try:
-                if isinstance(data, list):
-                    # Log reduzido para auction_end
-                    logger.debug(f"🏁 {len(data)} leilões finalizados")
-                elif isinstance(data, dict):
-                    # Log reduzido para leilão único
-                    logger.debug(f"🏁 Leilão finalizado: {data.get('id', 'Unknown')}")
-                else:
-                    logger.debug(f"🏁 Leilão finalizado: {type(data)} - {data}")
-                
-                self._update_last_data_received()
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar auction_end: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        @self.sio.on('trade_status', namespace='/trade')
-        async def on_trade_status(data):
-            """Status de trade."""
-            try:
-                if isinstance(data, list):
-                    logger.info(f"📊 STATUS DE TRADE (lista): {len(data)} itens")
-                    logger.info(f"📊 Dados completos: {data}")
-                elif isinstance(data, dict):
-                    logger.info(f"📊 STATUS DE TRADE: {data}")
-                else:
-                    logger.info(f"📊 STATUS DE TRADE: {type(data)} - {data}")
-                
-                self._update_last_data_received()
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar trade_status: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        @self.sio.on('timesync', namespace='/trade')
-        async def on_timesync(data):
-            """Sincronização de tempo."""
-            logger.debug(f"⏰ Timesync recebido: {data}")
-            self._update_last_data_received()
-        
-        @self.sio.on('error', namespace='/trade')
-        async def on_error(data):
-            """Erro do servidor."""
-            logger.error(f"❌ Erro do servidor WebSocket: {data}")
-        
-        @self.sio.on('connect_error', namespace='/trade')
-        async def on_connect_error(data):
-            """Erro de conexão."""
-            logger.error(f"❌ Erro de conexão WebSocket: {data}")
-        
-        @self.sio.on('disconnect', namespace='/trade')
-        async def on_disconnect(data):
-            """Desconexão."""
-            logger.warning(f"🔌 Desconectado do WebSocket: {data}")
-            self.is_connected = False
-            self.authenticated = False
-        
-        # Handler genérico para TODOS os eventos (debug e captura)
-        @self.sio.on('*', namespace='/trade')
-        async def on_any_event(event, data):
-            """Captura TODOS os eventos para debug e processamento ULTRA-RÁPIDO."""
-            try:
-                # Log do evento recebido (debug)
-                logger.debug(f"📡 EVENTO: {event} - Tipo: {type(data)}")
-                
-                # Se for lista com itens, processa IMEDIATAMENTE
-                if isinstance(data, list) and len(data) > 0:
-                    # Verifica se parece com lista de itens
-                    if isinstance(data[0], dict) and 'id' in data[0]:
-                        logger.info(f"🎯 ITENS DETECTADOS em '{event}': {len(data)} itens")
-                        
-                        # Processa cada item IMEDIATAMENTE (sem delay)
+                    if isinstance(data, list):
+                        logger.info(f"📋 Lista com {len(data)} itens")
                         for item in data:
-                            if isinstance(item, dict) and 'id' in item:
-                                # Processa item IMEDIATAMENTE
-                                await self._process_item(item, event)
+                            if isinstance(item, dict):
+                                await self._process_item(item, 'new_item')
+                    elif isinstance(data, dict):
+                        logger.info(f"📋 Item único recebido")
+                        await self._process_item(data, 'new_item')
                     
-                    # Se for lista de IDs (deleted_item), apenas loga
-                    elif isinstance(data[0], (int, str)):
-                        logger.debug(f"🗑️ Lista de IDs em '{event}': {len(data)} itens")
-                
-                # Se for item único, processa IMEDIATAMENTE
-                elif isinstance(data, dict) and 'id' in data:
-                    item_name = data.get('market_name', data.get('name', 'Unknown'))
-                    item_id = data.get('id', 'Unknown')
-                    logger.info(f"🎯 ITEM ÚNICO em '{event}': {item_name} (ID: {item_id})")
+                    self._update_last_data_received()
+                except Exception as e:
+                    logger.error(f"❌ Erro ao processar new_item: {e}")
+            
+            @self.sio.on('deleted_item', namespace='/trade')
+            async def on_deleted_item(data):
+                """Item removido."""
+                try:
+                    if isinstance(data, list):
+                        logger.debug(f"🗑️ {len(data)} itens removidos")
+                    else:
+                        logger.debug(f"🗑️ Item removido")
                     
-                    # Processa item IMEDIATAMENTE
-                    await self._process_item(data, event)
-                
-                # Atualiza timestamp de último dado recebido
+                    self._update_last_data_received()
+                except Exception as e:
+                    logger.error(f"❌ Erro ao processar deleted_item: {e}")
+            
+            @self.sio.on('timesync', namespace='/trade')
+            async def on_timesync(data):
+                """Sincronização de tempo."""
+                logger.debug(f"⏰ Timesync: {data}")
                 self._update_last_data_received()
-                
-            except Exception as e:
-                logger.error(f"❌ Erro ao processar evento '{event}': {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Handler genérico para capturar TODOS os eventos (debug)
+            @self.sio.on('*', namespace='/trade')
+            async def on_any_event(event, data):
+                """Captura TODOS os eventos para debug."""
+                try:
+                    # Log apenas eventos que não temos handlers específicos
+                    if event not in ['new_item', 'deleted_item', 'timesync']:
+                        logger.info(f"📡 EVENTO NÃO TRATADO: {event} - Tipo: {type(data)}")
+                        
+                        # Se for lista com itens, pode ser importante
+                        if isinstance(data, list) and len(data) > 0:
+                            if isinstance(data[0], dict) and 'id' in data[0]:
+                                logger.info(f"🎯 ITENS DETECTADOS em '{event}': {len(data)} itens")
+                                for item in data:
+                                    if isinstance(item, dict) and 'id' in item:
+                                        await self._process_item(item, event)
+                    
+                    self._update_last_data_received()
+                except Exception as e:
+                    logger.error(f"❌ Erro ao processar evento '{event}': {e}")
+            
+            logger.info("✅ Handlers de eventos configurados")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao configurar eventos: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     async def _identify_and_configure(self):
         """Identifica e configura filtros no WebSocket."""
@@ -505,32 +159,39 @@ class MarketplaceScanner:
                 'uuid': str(uuid.uuid4())
             })
             
-            # Configura eventos permitidos
+            # Configura APENAS eventos essenciais conforme documentação oficial
             await self.sio.emit('allowedEvents', {
-                'events': ['new_item', 'updated_item', 'auction_update', 'auction_end', 'deleted_item']
+                'events': ['new_item', 'deleted_item']
             })
+            logger.info("📤 Eventos permitidos configurados: new_item, deleted_item")
             
             # Configura filtros de preço
             await self.sio.emit('filters', {
                 'price_min': self.settings.MIN_PRICE,
                 'price_max': self.settings.MAX_PRICE
             })
+            logger.info("📤 Filtros de preço configurados")
             
-            # Inscreve em MÚLTIPLOS canais para capturar todos os tipos de itens
-            channels = [
-                'auctions', 'trading', 'marketplace', 'items', 'live',
-                'market', 'auction', 'trade', 'item', 'live_auctions',
-                'live_trading', 'live_market', 'live_items', 'all', 'global',
-                'csgo', 'csgoempire', 'empire', 'bot', 'stream'
-            ]
-            for channel in channels:
-                try:
-                    await self.sio.emit('subscribe', {'room': channel}, namespace='/trade')
-                    logger.info(f"📤 Inscrição no canal '{channel}' enviada")
-                except Exception as e:
-                    logger.warning(f"⚠️ Falha ao inscrever no canal '{channel}': {e}")
+            # Sincronização de tempo
+            await self.sio.emit('timesync', namespace='/trade')
+            logger.info("📤 Timesync solicitado")
             
-            logger.info("✅ WebSocket configurado e autenticado")
+            # Log de configuração
+            logger.info("🔍 Configuração do WebSocket concluída:")
+            logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
+            logger.info("   - Eventos permitidos: new_item, deleted_item")
+            logger.info("   - Aguardando itens...")
+            
+            # Log especial para debug
+            logger.info("🔍 MONITORAMENTO ATIVO:")
+            logger.info("   - WebSocket: ✅ Conectado")
+            logger.info("   - Autenticação: ✅ Confirmada")
+            logger.info("   - Eventos: ✅ Permitidos")
+            logger.info("   - Filtros: ✅ Configurados")
+            logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR ITENS!")
+            
+            self.authenticated = True
+            self._update_last_data_received()
             
         except Exception as e:
             logger.error(f"❌ Erro ao configurar WebSocket: {e}")
@@ -1356,6 +1017,71 @@ class MarketplaceScanner:
         """Método removido - foco apenas no WebSocket ultra-rápido."""
         pass
     
-    async def _fetch_items_via_api_fallback(self):
-        """Método removido - foco apenas no WebSocket ultra-rápido."""
-        pass
+    async def fetch_items_via_api_fallback(self):
+        """Busca itens via API do CSGOEmpire como fallback."""
+        try:
+            logger.info("🔍 Buscando itens via API de fallback...")
+            
+            # URL da API conforme documentação
+            api_url = "https://csgoempire.com/api/v2/trading/items"
+            
+            # Parâmetros para buscar itens recentes
+            params = {
+                'per_page': 50,  # Máximo de itens por página
+                'page': 1,
+                'auction': 'yes',  # Apenas itens de leilão
+                'sort': 'desc',  # Mais recentes primeiro
+                'order': 'market_value'  # Ordenar por valor de mercado
+            }
+            
+            # Headers necessários
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'application/json'
+            }
+            
+            # Faz a requisição HTTP
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, params=params, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if 'data' in data and isinstance(data['data'], list):
+                            items = data['data']
+                            logger.info(f"📡 API retornou {len(items)} itens")
+                            
+                            # Processa cada item encontrado
+                            for item in items:
+                                if isinstance(item, dict) and 'id' in item:
+                                    logger.info(f"🎯 Processando item da API: {item.get('market_name', 'Unknown')}")
+                                    await self._process_item(item, 'api_fallback')
+                        else:
+                            logger.warning(f"⚠️ Formato inesperado da API: {data}")
+                    else:
+                        logger.error(f"❌ API retornou status {response.status}")
+                        
+        except Exception as e:
+            logger.error(f"❌ Erro ao buscar itens via API: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    async def start_api_fallback_monitor(self):
+        """Inicia monitoramento para usar API de fallback quando necessário."""
+        logger.info("🔄 Iniciando monitor de API de fallback...")
+        
+        while True:
+            try:
+                # Verifica se WebSocket está funcionando bem
+                time_since_last_data = time.time() - self._last_data_received
+                
+                # Se não recebeu dados há mais de 5 minutos, usa API de fallback
+                if time_since_last_data > 300:  # 5 minutos
+                    logger.warning(f"⚠️ Sem dados há {time_since_last_data:.0f}s, usando API de fallback...")
+                    await self.fetch_items_via_api_fallback()
+                
+                # Aguarda antes da próxima verificação
+                await asyncio.sleep(60)  # Verifica a cada 1 minuto
+                
+            except Exception as e:
+                logger.error(f"❌ Erro no monitor de API: {e}")
+                await asyncio.sleep(60)

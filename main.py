@@ -213,8 +213,12 @@ async def main():
         logger.info("⚡ Iniciando WebSocket ultra-rápido...")
         await bot.start()
         
-        # Aguarda apenas o health server
-        await health_task
+        # Inicia o monitor de API de fallback em paralelo
+        logger.info("🔄 Iniciando monitor de API de fallback...")
+        api_monitor_task = asyncio.create_task(bot.start_api_fallback_monitor())
+        
+        # Aguarda o health server e o monitor de API
+        await asyncio.gather(health_task, api_monitor_task)
         
     except KeyboardInterrupt:
         logger.info("🛑 Interrupção recebida, encerrando...")

@@ -739,136 +739,54 @@ class MarketplaceScanner:
             return False
     
     async def _authenticate_websocket(self) -> bool:
-        """Autentica no WebSocket seguindo exatamente a documentação do CSGOEmpire."""
-        try:
-            logger.info("🔐 Iniciando autenticação WebSocket...")
-            
-            # Verifica se temos todos os dados necessários
-            if not all([self.user_id, self.user_model, self.socket_token, self.socket_signature]):
-                logger.error("❌ Dados incompletos para autenticação:")
-                logger.error(f"  - user_id: {self.user_id}")
-                logger.error(f"  - user_model: {self.user_model}")
-                logger.error(f"  - socket_token: {self.socket_token[:20] if self.socket_token else 'None'}...")
-                logger.error(f"  - socket_signature: {self.socket_signature[:20] if self.socket_signature else 'None'}...")
-                return False
-            
-            # Payload exatamente como na documentação
-            identify_payload = {
-                "uid": self.user_id,
-                "model": self.user_model,
-                "authorizationToken": self.socket_token,
-                "signature": self.socket_signature,
-                "uuid": str(uuid.uuid4())  # UUID opcional como na documentação
-            }
-            
-            logger.info(f"📤 Emitindo identify com uid: {self.user_id}")
-            logger.info(f"📤 Payload completo: {identify_payload}")
-            
-            try:
-                await self.sio.emit('identify', identify_payload, namespace='/trade')
-                logger.info("✅ Evento identify emitido com sucesso")
-            except Exception as e:
-                logger.error(f"❌ Erro ao emitir identify: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                return False
-            
-            logger.info("⏳ Identify enviado, aguardando autenticação...")
-            
-            # Aguarda autenticação conforme documentação
-            for i in range(30):  # 30 segundos timeout para autenticação
-                if self.authenticated:
-                    logger.info("✅ Autenticação confirmada!")
-                    return True
-                if i % 5 == 0:  # Log a cada 5 segundos
-                    logger.info(f"⏳ Aguardando confirmação de autenticação... ({i}s)")
-                await asyncio.sleep(1)
-            
-            logger.error("❌ Timeout aguardando confirmação de autenticação")
-            return False
-            
-        except Exception as e:
-            logger.error(f"❌ Erro na autenticação: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
+        """Método removido - autenticação é feita automaticamente após conectar."""
+        pass
     
-    async def connect(self) -> bool:
-        """Conecta ao WebSocket do CSGOEmpire."""
+    async def start(self):
+        """Inicia o scanner de marketplace."""
         try:
-            # Verifica se já está conectado
-            if self.is_connected and self.authenticated:
-                logger.info("✅ Já conectado ao WebSocket")
-                return True
-            
-            # Verifica se excedeu tentativas de reconexão
-            if self.reconnect_attempts >= self.max_reconnect_attempts:
-                logger.error(f"❌ Máximo de tentativas de reconexão atingido ({self.max_reconnect_attempts})")
-                return False
-            
-            logger.info("🔄 Tentando conectar ao WebSocket...")
+            logger.info("🚀 Iniciando scanner de marketplace...")
             
             # Testa conexão com Supabase
             logger.info("🔍 Testando conexão com Supabase...")
-            if not await self.supabase.test_connection():
+            if not await self.supabase.test_connection(): # Changed from test_supabase_connection to supabase.test_connection
                 logger.error("❌ Falha na conexão com Supabase")
                 return False
-            logger.info("✅ Conexão com Supabase OK")
             
-            # Obtém metadata (já verifica API key indiretamente)
-            if not await self._get_socket_metadata():
-                logger.error("❌ Falha ao obter metadata")
-                self.reconnect_attempts += 1
+            # Conecta ao WebSocket
+            logger.info("🔄 Tentando conectar ao WebSocket...")
+            if not await self._connect_websocket():
+                logger.error("❌ Falha ao conectar ao WebSocket")
                 return False
             
-            # Configura handlers ANTES de conectar (crítico!)
+            # Configura handlers de eventos
             logger.info("🔧 Configurando handlers de eventos...")
             self._setup_socket_events()
             
-            # Conecta ao WebSocket
-            if not await self._connect_websocket():
-                logger.error("❌ Falha ao conectar WebSocket")
-                self.reconnect_attempts += 1
+            # Verifica se já está conectado
+            if self.sio.connected:
+                logger.info("✅ WebSocket já está conectado")
+                # Configura automaticamente se já estiver conectado
+                await self._configure_websocket_after_connection()
+            else:
+                logger.warning("⚠️ WebSocket não está conectado")
                 return False
             
-            # Aguarda eventos e tenta autenticação
-            logger.info("⏳ Aguardando eventos e tentando autenticação...")
+            # Aguarda um pouco para estabilizar
+            await asyncio.sleep(2)
             
-            # Loop de aguardar eventos ou autenticação
-            for i in range(30):  # 30 segundos timeout total
-                if self.authenticated:
-                    logger.info("✅ Autenticação confirmada!")
-                    break
+            # Verifica se está funcionando
+            if self.authenticated:
+                logger.info("✅ Scanner iniciado com sucesso!")
+                return True
+            else:
+                logger.warning("⚠️ Scanner iniciado mas autenticação não confirmada")
+                return True  # Continua mesmo sem confirmação de autenticação
                 
-                if i % 5 == 0:  # Log a cada 5 segundos
-                    logger.info(f"⏳ Aguardando autenticação... ({i}s)")
-                    logger.info(f"📊 Status: sio.connected={self.sio.connected}, authenticated={self.authenticated}")
-                
-                # Se chegou a 10 segundos e ainda não autenticou, tenta autenticação manual
-                if i == 10 and not self.authenticated:
-                    logger.info("🔄 Tentando autenticação manual após 10s...")
-                    if await self._authenticate_websocket():
-                        logger.info("✅ Autenticação manual bem-sucedida!")
-                        break
-                    else:
-                        logger.warning("⚠️ Autenticação manual falhou, continuando aguardando...")
-                
-                await asyncio.sleep(1)
-            
-            # Verifica se foi autenticado
-            if not self.authenticated:
-                logger.error("❌ Falha na autenticação após 30s")
-                self.reconnect_attempts += 1
-                return False
-            
-            # Reset de tentativas se conectou com sucesso
-            self.reconnect_attempts = 0
-            logger.info("✅ Conectado e autenticado com sucesso ao WebSocket")
-            return True
-            
         except Exception as e:
-            logger.error(f"❌ Erro ao conectar WebSocket: {e}")
-            self.reconnect_attempts += 1
+            logger.error(f"❌ Erro ao iniciar scanner: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def _get_socket_metadata(self) -> bool:
@@ -1109,8 +1027,8 @@ class MarketplaceScanner:
                 'uuid': str(uuid.uuid4())
             }, namespace='/trade')
             
-            # Aguarda um pouco para a autenticação
-            await asyncio.sleep(2)
+            # NÃO aguarda resposta do init - configura diretamente
+            logger.info("⚡ Configurando filtros e eventos diretamente após identify...")
             
             # Configura APENAS eventos essenciais conforme documentação oficial
             logger.info("📤 Configurando eventos permitidos...")

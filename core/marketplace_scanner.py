@@ -102,7 +102,7 @@ class MarketplaceScanner:
                     elif isinstance(data, dict):
                         logger.info(f"📋 Item único recebido")
                         item_name = data.get('market_name', data.get('name', 'Unknown'))
-                        item_id = data.get('id', 'Unknown')
+                        item_id = item.get('id', 'Unknown')
                         logger.info(f"   🆕 {item_name} (ID: {item_id})")
                         await self._process_item(data, 'new_item')
                     
@@ -116,6 +116,36 @@ class MarketplaceScanner:
             async def on_error(data):
                 """Erro do servidor WebSocket."""
                 logger.warning(f"⚠️ Erro do servidor WebSocket: {data}")
+                
+                # Se for erro de autenticação, marca como não autenticado
+                if isinstance(data, dict):
+                    error_msg = data.get('error', '').lower()
+                    if 'identify failed' in error_msg or 'authentication' in error_msg:
+                        logger.error("❌ Falha na autenticação - marcando como não autenticado")
+                        self.authenticated = False
+                        # Tenta reconectar
+                        asyncio.create_task(self._reconnect_websocket())
+            
+            # Handler para eventos de autenticação
+            @self.sio.on('init', namespace='/trade')
+            async def on_init(data):
+                """Evento de inicialização/autenticação."""
+                try:
+                    logger.info(f"📡 Evento init recebido: {data}")
+                    
+                    if isinstance(data, dict):
+                        auth_status = data.get('authenticated', False)
+                        if auth_status:
+                            logger.info("✅ Autenticação confirmada pelo servidor")
+                            self.authenticated = True
+                        else:
+                            logger.warning("⚠️ Servidor indica que não está autenticado")
+                            self.authenticated = False
+                    else:
+                        logger.info(f"📡 Evento init recebido (tipo: {type(data)})")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Erro ao processar evento init: {e}")
             
             logger.info("✅ Handlers de eventos configurados")
             
@@ -240,26 +270,51 @@ class MarketplaceScanner:
             }, namespace='/trade')
             logger.info("📤 Filtros configurados: preço apenas")
             
-            # Marca como autenticado
-            self.authenticated = True
+            # NÃO marca como autenticado aqui - aguarda confirmação do servidor
+            logger.info("⏳ Aguardando confirmação de autenticação do servidor...")
+            logger.info("⏳ Aguardando evento 'init' com authenticated=true...")
             
             # Log de configuração
             logger.info("🔍 Configuração do WebSocket concluída:")
             logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
             logger.info("   - Evento único: new_item")
-            logger.info("   - Aguardando novos itens...")
+            logger.info("   - Aguardando confirmação de autenticação...")
             
             logger.info("🔍 MONITORAMENTO ATIVO:")
             logger.info("   - WebSocket: ✅ Conectado")
-            logger.info("   - Autenticação: ✅ Confirmada")
+            logger.info("   - Autenticação: ⏳ Aguardando confirmação")
             logger.info("   - Evento: ✅ new_item")
             logger.info("   - Filtros: ✅ Configurados")
-            logger.info("   - Status: 🎯 PRONTO PARA CAPTURAR NOVOS ITENS!")
+            logger.info("   - Status: 🔄 AGUARDANDO AUTENTICAÇÃO DO SERVIDOR")
             
         except Exception as e:
             logger.error(f"❌ Erro ao configurar WebSocket: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    async def _reconnect_websocket(self):
+        """Reconecta ao WebSocket após falha de autenticação."""
+        try:
+            logger.info("🔄 Reconectando WebSocket após falha de autenticação...")
+            
+            # Desconecta atual
+            if self.sio.connected:
+                await self.sio.disconnect()
+                logger.info("🔌 WebSocket desconectado para reconexão")
+            
+            # Aguarda um pouco
+            await asyncio.sleep(5)
+            
+            # Reconecta
+            if await self._connect_websocket():
+                logger.info("✅ Reconexão bem-sucedida")
+                # Reconfigura
+                await self._configure_websocket()
+            else:
+                logger.error("❌ Falha na reconexão")
+                
+        except Exception as e:
+            logger.error(f"❌ Erro durante reconexão: {e}")
     
     async def _process_item(self, item: Dict, event_type: str) -> None:
         """Processa um item recebido."""

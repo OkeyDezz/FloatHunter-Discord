@@ -56,9 +56,14 @@ class OpportunityBot:
         try:
             logger.info("🔄 Bot iniciado, modo minimalista ativo...")
             
-            # Loop principal simples
-            while self.running:
+            # Loop principal simples - SEMPRE roda
+            while True:  # Loop infinito - nunca para
                 try:
+                    # Verifica se deve parar
+                    if not self.running:
+                        logger.info("🔄 Sinal de parada recebido...")
+                        break
+                    
                     # Verifica status a cada 30 segundos
                     await asyncio.sleep(30)
                     logger.info("ℹ️ Bot em modo minimalista - health check ativo")
@@ -66,8 +71,9 @@ class OpportunityBot:
                 except Exception as e:
                     logger.error(f"❌ Erro no loop principal: {e}")
                     await asyncio.sleep(5)
+                    # Continua rodando mesmo com erro
             
-            # Shutdown graceful
+            # Shutdown graceful (só se self.running for False)
             logger.info("🔄 Iniciando shutdown...")
             await self.shutdown()
             
@@ -75,6 +81,12 @@ class OpportunityBot:
             logger.error(f"❌ Erro fatal no bot: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Loop de emergência - nunca para
+            logger.info("🚨 Entrando em modo de emergência...")
+            while True:
+                await asyncio.sleep(30)
+                logger.info("🚨 Modo de emergência - processo mantido vivo")
     
     async def shutdown(self):
         """Shutdown graceful do bot."""
@@ -108,7 +120,17 @@ async def main():
         bot = OpportunityBot()
         if await bot.initialize():
             bot.running = True
-            await bot.run()
+            logger.info("🤖 Bot inicializado com sucesso - iniciando loop principal...")
+            
+            # Loop principal do bot
+            try:
+                await bot.run()
+            except Exception as e:
+                logger.error(f"❌ Erro no loop principal: {e}")
+                # Continua rodando mesmo com erro
+                while True:
+                    await asyncio.sleep(30)
+                    logger.info("ℹ️ Bot em modo de recuperação - aguardando...")
         else:
             logger.error("❌ Falha na inicialização do bot")
             # Mantém health check rodando mesmo se bot falhar

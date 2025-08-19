@@ -76,6 +76,14 @@ async def main():
         while True:
             time.sleep(30)
             print("🚨 Modo de emergência síncrono - processo mantido vivo")
+                
+    except Exception as e:
+        logger.error(f"❌ Erro fatal na aplicação: {e}")
+        
+        # Loop de emergência síncrono
+        while True:
+            time.sleep(30)
+            print("🚨 Modo de emergência síncrono - processo mantido vivo")
 
 if __name__ == "__main__":
     try:

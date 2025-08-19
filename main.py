@@ -57,9 +57,15 @@ class OpportunityBot:
         try:
             logger.info(f"🎯 Oportunidade encontrada em {marketplace}: {item.get('name', 'Unknown')}")
             
-            # Posta no Discord
+            # Posta no Discord se disponível
             if self.discord_poster:
-                await self.discord_poster.post_opportunity(item)
+                try:
+                    await self.discord_poster.post_opportunity(item)
+                    logger.info("✅ Oportunidade enviada para Discord")
+                except Exception as e:
+                    logger.error(f"❌ Erro ao enviar para Discord: {e}")
+            else:
+                logger.info("ℹ️ Discord não disponível - oportunidade apenas logada")
             
         except Exception as e:
             logger.error(f"❌ Erro ao processar oportunidade: {e}")
@@ -69,36 +75,67 @@ class OpportunityBot:
         try:
             logger.info("🚀 Iniciando Opportunity Bot...")
             
-            # Valida configurações
-            if not self.settings.validate():
-                logger.error("❌ Configurações inválidas")
+            # Log das configurações carregadas
+            logger.info("📋 Configurações carregadas:")
+            logger.info(f"   - CSGOEMPIRE_API_KEY: {'✅' if self.settings.CSGOEMPIRE_API_KEY else '❌'}")
+            logger.info(f"   - DISCORD_TOKEN: {'✅' if self.settings.DISCORD_TOKEN else '❌'}")
+            logger.info(f"   - CSGOEMPIRE_CHANNEL_ID: {'✅' if self.settings.CSGOEMPIRE_CHANNEL_ID else '❌'}")
+            logger.info(f"   - SUPABASE_URL: {'✅' if self.settings.SUPABASE_URL else '❌'}")
+            logger.info(f"   - SUPABASE_KEY: {'✅' if self.settings.SUPABASE_KEY else '❌'}")
+            
+            # Valida configurações básicas
+            if not self.settings.CSGOEMPIRE_API_KEY:
+                logger.error("❌ CSGOEMPIRE_API_KEY não configurada")
+                return False
+            
+            if not self.settings.SUPABASE_URL or not self.settings.SUPABASE_KEY:
+                logger.error("❌ Configurações do Supabase incompletas")
                 return False
             
             # Testa conexão com Supabase
             logger.info("🔍 Testando conexão com Supabase...")
-            supabase = SupabaseClient()
-            await supabase.test_connection()
-            logger.info("✅ Conexão com Supabase OK")
+            try:
+                supabase = SupabaseClient()
+                await supabase.test_connection()
+                logger.info("✅ Conexão com Supabase OK")
+            except Exception as e:
+                logger.error(f"❌ Falha na conexão com Supabase: {e}")
+                return False
             
-            # Inicializa Discord
+            # Inicializa Discord (opcional para health check)
             logger.info("🤖 Inicializando Discord...")
-            self.discord_poster = DiscordPoster(self.settings)
-            await self.discord_poster.initialize()
-            logger.info("✅ Discord conectado")
+            try:
+                if self.settings.DISCORD_TOKEN and self.settings.CSGOEMPIRE_CHANNEL_ID:
+                    self.discord_poster = DiscordPoster(self.settings)
+                    await self.discord_poster.initialize()
+                    logger.info("✅ Discord conectado")
+                else:
+                    logger.warning("⚠️ Discord não configurado - continuando sem Discord")
+                    self.discord_poster = None
+            except Exception as e:
+                logger.warning(f"⚠️ Falha ao inicializar Discord: {e} - continuando sem Discord")
+                self.discord_poster = None
             
             # Inicializa scanner
             logger.info("🔄 Inicializando scanner...")
-            self.scanner = MarketplaceScanner(
-                settings=self.settings,
-                discord_poster=self.discord_poster,
-                opportunity_callback=self._on_opportunity_found
-            )
+            try:
+                self.scanner = MarketplaceScanner(
+                    settings=self.settings,
+                    discord_poster=self.discord_poster,
+                    opportunity_callback=self._on_opportunity_found
+                )
+                logger.info("✅ Scanner inicializado")
+            except Exception as e:
+                logger.error(f"❌ Falha ao inicializar scanner: {e}")
+                return False
             
             logger.info("✅ Opportunity Bot inicializado com sucesso")
             return True
             
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar bot: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def run(self):
@@ -126,8 +163,14 @@ class OpportunityBot:
             self.running = True
             logger.info("🔄 Bot iniciado, monitorando oportunidades...")
             
-            # Inicia scanner
-            await self.scanner.start()
+            # Inicia scanner se disponível
+            if self.scanner:
+                try:
+                    await self.scanner.start()
+                    logger.info("✅ Scanner iniciado com sucesso")
+                except Exception as e:
+                    logger.error(f"❌ Falha ao iniciar scanner: {e}")
+                    # Continua sem scanner para manter health check funcionando
             
             # Loop principal
             while self.running:
@@ -138,8 +181,10 @@ class OpportunityBot:
                     # Log de status
                     if self.scanner and self.scanner.is_connected:
                         logger.debug("✅ WebSocket conectado, monitorando...")
-                    else:
+                    elif self.scanner:
                         logger.warning("⚠️ WebSocket desconectado, tentando reconectar...")
+                    else:
+                        logger.info("ℹ️ Scanner não disponível - apenas health check ativo")
                     
                 except Exception as e:
                     logger.error(f"❌ Erro no loop principal: {e}")

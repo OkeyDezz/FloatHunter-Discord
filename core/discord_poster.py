@@ -1,251 +1,255 @@
 """
 Sistema de postagem no Discord para o Opportunity Bot.
+Versão simplificada usando apenas webhooks - sem dependência do discord.py.
 """
 
-import discord
+import aiohttp
 import logging
 import asyncio
-from typing import List, Dict, Optional
+from typing import Dict, Optional
 from datetime import datetime
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 class DiscordPoster:
-    """Gerencia postagens no Discord."""
+    """Gerencia postagens no Discord usando webhooks."""
     
     def __init__(self):
         self.settings = Settings()
-        self.client = None
-        self.is_ready = False
+        self.webhook_url = self.settings.DISCORD_WEBHOOK_URL
         
-    async def initialize(self):
-        """Inicializa o cliente do Discord."""
-        try:
-            if not self.settings.DISCORD_TOKEN:
-                logger.error("❌ Token do Discord não configurado")
-                return False
-            
-            intents = discord.Intents.default()
-            intents.message_content = True
-            
-            self.client = discord.Client(intents=intents)
-            
-            @self.client.event
-            async def on_ready():
-                logger.info(f"🤖 Bot do Discord conectado como {self.client.user}")
-                self.is_ready = True
-            
-            # Inicia o cliente em background
-            asyncio.create_task(self.client.start(self.settings.DISCORD_TOKEN))
-            
-            # Aguarda conexão
-            timeout = 30
-            while not self.is_ready and timeout > 0:
-                await asyncio.sleep(1)
-                timeout -= 1
-            
-            if not self.is_ready:
-                logger.error("❌ Timeout ao conectar ao Discord")
-                return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao inicializar Discord: {e}")
-            return False
+        if not self.webhook_url:
+            logger.warning("⚠️ Discord webhook URL não configurada")
     
-    async def post_opportunity(self, item: Dict, marketplace: str = "csgoempire"):
+    async def post_opportunity(self, item: Dict) -> bool:
         """
-        Posta uma oportunidade no canal do Discord.
+        Posta uma oportunidade no Discord usando webhook.
         
         Args:
-            item: Dados do item
-            marketplace: Nome do marketplace
+            item: Dicionário com dados do item
+            
+        Returns:
+            bool: True se enviou com sucesso, False caso contrário
         """
         try:
-            if not self.is_ready or not self.client:
-                logger.warning("Discord não está pronto")
+            if not self.webhook_url:
+                logger.error("❌ Discord webhook URL não configurada")
                 return False
             
-            channel_id = self._get_channel_id(marketplace)
-            if not channel_id:
-                logger.warning(f"Canal não configurado para {marketplace}")
-                return False
+            # Prepara os dados do embed
+            embed = self._create_embed(item)
             
-            channel = self.client.get_channel(channel_id)
-            if not channel:
-                logger.error(f"Canal {channel_id} não encontrado")
-                return False
+            # Prepara o payload do webhook
+            payload = {
+                "embeds": [embed],
+                "username": "Opportunity Bot",
+                "avatar_url": "https://i.imgur.com/4M34hi2.png"
+            }
             
-            # Formata a mensagem
-            embed = self._create_opportunity_embed(item, marketplace)
-            
-            # Envia a mensagem
-            await channel.send(embed=embed)
-            logger.info(f"✅ Oportunidade postada no Discord: {item.get('name', 'Unknown')}")
-            
-            return True
-            
+            # Envia via webhook
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.webhook_url, json=payload) as response:
+                    if response.status == 204:
+                        logger.info(f"✅ Oportunidade enviada para Discord: {item.get('name', 'Unknown')}")
+                        return True
+                    else:
+                        logger.error(f"❌ Erro ao enviar para Discord: {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"❌ Resposta: {error_text}")
+                        return False
+                        
         except Exception as e:
-            logger.error(f"❌ Erro ao postar no Discord: {e}")
+            logger.error(f"❌ Erro ao enviar para Discord: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
-    def _get_channel_id(self, marketplace: str) -> Optional[int]:
-        """Retorna o ID do canal para o marketplace."""
-        mapping = {
-            'csgoempire': self.settings.CSGOEMPIRE_CHANNEL_ID,
-            # Futuros marketplaces
-            # 'csfloat': self.settings.CSFLOAT_CHANNEL_ID,
-            # 'whitemarket': self.settings.WHITEMARKET_CHANNEL_ID,
-        }
-        return mapping.get(marketplace)
-    
-    def _create_opportunity_embed(self, item: Dict, marketplace: str) -> discord.Embed:
-        """Cria um embed do Discord para a oportunidade."""
+    def _create_embed(self, item: Dict) -> Dict:
+        """
+        Cria um embed do Discord com as informações do item.
+        
+        Args:
+            item: Dicionário com dados do item
+            
+        Returns:
+            Dict: Embed formatado para Discord
+        """
         try:
-            # Cria o link direto para o item no CSGOEmpire
-            item_id = item.get('id')
-            csgoempire_link = f"https://csgoempire.com/item/{item_id}" if item_id else None
+            # Dados básicos do item
+            name = item.get('name', 'Item Desconhecido')
+            price = item.get('price', 0)
+            price_buff163 = item.get('price_buff163')
+            liquidity_score = item.get('liquidity_score')
+            condition = item.get('condition', 'Unknown')
+            marketplace = item.get('marketplace', 'csgoempire')
+            item_id = item.get('id', 'Unknown')
             
-            embed = discord.Embed(
-                title="🎯 OPORTUNIDADE ENCONTRADA!",
-                description=f"**{item.get('name', 'Item desconhecido')}**",
-                color=0x00ff00,  # Verde
-                timestamp=datetime.now()
-            )
+            # Calcula lucro se tiver preço do Buff163
+            profit_percentage = None
+            profit_usd = None
             
-            # Adiciona link direto para o item
-            if csgoempire_link:
-                embed.add_field(
-                    name="🔗 Link Direto", 
-                    value=f"[Clique aqui para ver no CSGOEmpire]({csgoempire_link})", 
-                    inline=False
-                )
+            if price_buff163 and price > 0:
+                profit_usd = price_buff163 - price
+                profit_percentage = ((price_buff163 - price) / price) * 100
             
-            # Adiciona campos de preço
-            if 'price' in item:
-                embed.add_field(
-                    name="💰 Preço CSGOEmpire", 
-                    value=f"${item['price']:.2f}", 
-                    inline=True
-                )
-            
-            if 'price_buff163' in item:
-                embed.add_field(
-                    name="🏪 Preço Buff163", 
-                    value=f"${item['price_buff163']:.2f}", 
-                    inline=True
-                )
-            
-            # Calcula e mostra o lucro percentual
-            if 'price' in item and 'price_buff163' in item:
-                try:
-                    price_csgoempire = float(item['price'])
-                    price_buff163 = float(item['price_buff163'])
-                    
-                    if price_csgoempire > 0:
-                        profit_percentage = ((price_buff163 - price_csgoempire) / price_csgoempire) * 100
-                        
-                        # Define cor baseada no lucro
-                        if profit_percentage >= 20:
-                            profit_color = "🟢"  # Verde para alto lucro
-                        elif profit_percentage >= 10:
-                            profit_color = "🟡"  # Amarelo para médio lucro
-                        else:
-                            profit_color = "🔴"  # Vermelho para baixo lucro
-                        
-                        embed.add_field(
-                            name="📈 Lucro Potencial", 
-                            value=f"{profit_color} {profit_percentage:+.2f}%", 
-                            inline=True
-                        )
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"⚠️ Erro ao calcular lucro: {e}")
-            
-            # Adiciona informações de liquidez (SEMPRE mostrar)
-            if 'liquidity_score' in item:
-                liquidity_score = item['liquidity_score']
-                # Define cor baseada no score de liquidez
-                if liquidity_score >= 80:
-                    liquidity_color = "🟢"  # Verde para alta liquidez
-                elif liquidity_score >= 60:
-                    liquidity_color = "🟡"  # Amarelo para média liquidez
+            # Cor do embed baseada no lucro
+            if profit_percentage:
+                if profit_percentage >= 20:
+                    color = 0x00FF00  # Verde claro (lucro alto)
+                elif profit_percentage >= 10:
+                    color = 0x32CD32  # Verde
+                elif profit_percentage >= 5:
+                    color = 0xFFD700  # Dourado
                 else:
-                    liquidity_color = "🔴"  # Vermelho para baixa liquidez
-                
-                embed.add_field(
-                    name="💧 Liquidez", 
-                    value=f"{liquidity_color} {liquidity_score:.1f}/100", 
-                    inline=True
-                )
+                    color = 0xFFA500  # Laranja
             else:
-                # Se não tiver liquidez, mostra como "N/A"
-                embed.add_field(
-                    name="💧 Liquidez", 
-                    value="❓ N/A", 
-                    inline=True
-                )
+                color = 0x808080  # Cinza (sem dados de lucro)
             
-            # Adiciona informações do leilão
-            if 'auction_ends_at' in item and item['auction_ends_at']:
-                auction_end = datetime.fromtimestamp(item['auction_ends_at'])
-                embed.add_field(
-                    name="⏰ Leilão Termina", 
-                    value=f"<t:{item['auction_ends_at']}:R>", 
-                    inline=True
-                )
+            # Emoji para liquidez
+            if liquidity_score:
+                if liquidity_score >= 80:
+                    liquidity_emoji = "🔥"
+                elif liquidity_score >= 60:
+                    liquidity_emoji = "💧"
+                elif liquidity_score >= 40:
+                    liquidity_emoji = "💦"
+                else:
+                    liquidity_emoji = "❄️"
+            else:
+                liquidity_emoji = "❓"
             
-            if 'auction_number_of_bids' in item:
-                embed.add_field(
-                    name="🏆 Lances", 
-                    value=str(item['auction_number_of_bids']), 
-                    inline=True
-                )
+            # URL do item
+            item_url = f"https://csgoempire.com/shop?id={item_id}"
             
-            # Adiciona informações do item
-            if 'condition' in item and item['condition'] != 'Unknown':
-                embed.add_field(
-                    name="🎨 Condição", 
-                    value=item['condition'], 
-                    inline=True
-                )
+            # Título do embed
+            title = f"🎯 Oportunidade Encontrada!"
             
-            if 'float_value' in item and item['float_value']:
-                embed.add_field(
-                    name="🔢 Float", 
-                    value=f"{item['float_value']:.4f}", 
-                    inline=True
-                )
+            # Descrição
+            description = f"**{name}**\n[🔗 Ver no CSGOEmpire]({item_url})"
             
-            # Adiciona marketplace
-            embed.add_field(
-                name="🏪 Marketplace", 
-                value=marketplace.upper(), 
-                inline=True
-            )
+            # Campos do embed
+            fields = []
             
-            # Footer
-            embed.set_footer(text="Opportunity Bot - Detectando oportunidades 24/7")
+            # Preços
+            fields.append({
+                "name": "💰 Preços",
+                "value": (
+                    f"**CSGOEmpire:** ${price:.2f}\n"
+                    f"**Buff163:** ${price_buff163:.2f}" if price_buff163 else "**Buff163:** Não encontrado"
+                ),
+                "inline": True
+            })
+            
+            # Lucro
+            if profit_percentage and profit_usd:
+                fields.append({
+                    "name": "📈 Lucro Potencial",
+                    "value": (
+                        f"**${profit_usd:.2f}**\n"
+                        f"**{profit_percentage:.1f}%**"
+                    ),
+                    "inline": True
+                })
+            else:
+                fields.append({
+                    "name": "📈 Lucro",
+                    "value": "Não calculável",
+                    "inline": True
+                })
+            
+            # Liquidez
+            if liquidity_score:
+                fields.append({
+                    "name": f"{liquidity_emoji} Liquidez",
+                    "value": f"**{liquidity_score:.0f}/100**",
+                    "inline": True
+                })
+            else:
+                fields.append({
+                    "name": "❓ Liquidez",
+                    "value": "Não encontrada",
+                    "inline": True
+                })
+            
+            # Detalhes do item
+            fields.append({
+                "name": "🔍 Detalhes",
+                "value": (
+                    f"**Condição:** {condition}\n"
+                    f"**ID:** {item_id}\n"
+                    f"**Marketplace:** {marketplace.upper()}"
+                ),
+                "inline": True
+            })
+            
+            # Timestamp
+            timestamp = datetime.now().isoformat()
+            
+            # Embed completo
+            embed = {
+                "title": title,
+                "description": description,
+                "color": color,
+                "fields": fields,
+                "timestamp": timestamp,
+                "footer": {
+                    "text": f"Opportunity Bot • {marketplace.upper()}",
+                    "icon_url": "https://i.imgur.com/4M34hi2.png"
+                },
+                "thumbnail": {
+                    "url": "https://i.imgur.com/4M34hi2.png"
+                }
+            }
             
             return embed
             
         except Exception as e:
-            logger.error(f"Erro ao criar embed: {e}")
+            logger.error(f"❌ Erro ao criar embed: {e}")
             # Embed de fallback
-            embed = discord.Embed(
-                title="🎯 OPORTUNIDADE ENCONTRADA!",
-                description="Item detectado no marketplace",
-                color=0x00ff00,
-                timestamp=datetime.now()
-            )
-            return embed
+            return {
+                "title": "❌ Erro ao processar item",
+                "description": f"Item: {item.get('name', 'Unknown')}",
+                "color": 0xFF0000,
+                "timestamp": datetime.now().isoformat()
+            }
     
-    async def close(self):
-        """Fecha a conexão com o Discord."""
+    async def test_webhook(self) -> bool:
+        """
+        Testa se o webhook está funcionando.
+        
+        Returns:
+            bool: True se o webhook funciona, False caso contrário
+        """
         try:
-            if self.client:
-                await self.client.close()
-                logger.info("Discord desconectado")
+            if not self.webhook_url:
+                logger.error("❌ Discord webhook URL não configurada")
+                return False
+            
+            # Payload de teste
+            test_payload = {
+                "embeds": [{
+                    "title": "🧪 Teste do Opportunity Bot",
+                    "description": "Webhook configurado com sucesso!",
+                    "color": 0x00FF00,
+                    "timestamp": datetime.now().isoformat(),
+                    "footer": {
+                        "text": "Opportunity Bot • Teste"
+                    }
+                }],
+                "username": "Opportunity Bot",
+                "avatar_url": "https://i.imgur.com/4M34hi2.png"
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.webhook_url, json=test_payload) as response:
+                    if response.status == 204:
+                        logger.info("✅ Webhook do Discord testado com sucesso")
+                        return True
+                    else:
+                        logger.error(f"❌ Erro no teste do webhook: {response.status}")
+                        return False
+                        
         except Exception as e:
-            logger.error(f"Erro ao desconectar Discord: {e}")
+            logger.error(f"❌ Erro ao testar webhook: {e}")
+            return False

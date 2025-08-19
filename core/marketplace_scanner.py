@@ -747,9 +747,14 @@ class MarketplaceScanner:
         try:
             logger.info("🚀 Iniciando scanner de marketplace...")
             
+            # Obtém metadata antes de conectar
+            if not await self._get_socket_metadata():
+                logger.error("❌ Falha ao obter metadata")
+                return False
+            
             # Testa conexão com Supabase
             logger.info("🔍 Testando conexão com Supabase...")
-            if not await self.supabase.test_connection(): # Changed from test_supabase_connection to supabase.test_connection
+            if not await self.supabase.test_connection():
                 logger.error("❌ Falha na conexão com Supabase")
                 return False
             
@@ -761,7 +766,7 @@ class MarketplaceScanner:
             
             # Configura handlers de eventos
             logger.info("🔧 Configurando handlers de eventos...")
-            self._setup_socket_events()
+            await self._setup_socket_events()
             
             # Verifica se já está conectado
             if self.sio.connected:
@@ -788,6 +793,10 @@ class MarketplaceScanner:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
+    
+    async def connect(self):
+        """Alias para start() - mantém compatibilidade."""
+        return await self.start()
     
     async def _get_socket_metadata(self) -> bool:
         """Obtém metadata para autenticação do WebSocket (seguindo docs)."""
@@ -890,7 +899,7 @@ class MarketplaceScanner:
             while True:
                 try:
                     # Tenta conectar
-                    if await self.connect():
+                    if await self.start():
                         logger.info("✅ Scanner conectado, aguardando oportunidades...")
                         
                         # Loop de monitoramento com verificação de saúde

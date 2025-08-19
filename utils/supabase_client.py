@@ -24,14 +24,35 @@ class SupabaseClient:
                 logger.error("❌ Configurações do Supabase não encontradas")
                 return
             
+            # Inicialização mais simples e compatível
+            logger.info(f"🔧 Inicializando cliente Supabase...")
+            logger.info(f"   URL: {self.settings.SUPABASE_URL}")
+            logger.info(f"   Key: {self.settings.SUPABASE_KEY[:10]}...")
+            
+            # Tenta inicialização básica
             self.client = create_client(
-                self.settings.SUPABASE_URL,
-                self.settings.SUPABASE_KEY
+                supabase_url=self.settings.SUPABASE_URL,
+                supabase_key=self.settings.SUPABASE_KEY
             )
+            
             logger.info("✅ Cliente Supabase inicializado")
             
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar cliente Supabase: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Tenta inicialização alternativa
+            try:
+                logger.info("🔄 Tentando inicialização alternativa...")
+                self.client = create_client(
+                    self.settings.SUPABASE_URL,
+                    self.settings.SUPABASE_KEY
+                )
+                logger.info("✅ Cliente Supabase inicializado (método alternativo)")
+            except Exception as e2:
+                logger.error(f"❌ Falha na inicialização alternativa: {e2}")
+                self.client = None
     
     async def get_buff163_price(self, market_hash_name: str) -> Optional[float]:
         """

@@ -6,12 +6,14 @@ import asyncio
 import logging
 import signal
 import sys
+import os
 from datetime import datetime
 from typing import Dict
 
 from config.settings import Settings
 from core.marketplace_scanner import MarketplaceScanner
 from core.discord_poster import DiscordPoster
+from utils.supabase_client import SupabaseClient
 from health_server import HealthServer
 
 # Configuração de logging
@@ -31,12 +33,9 @@ class OpportunityBot:
     
     def __init__(self):
         self.settings = Settings()
-        self.scanner = MarketplaceScanner()
-        self.discord_poster = DiscordPoster()
+        self.discord_poster = None
+        self.scanner = None
         self.running = False
-        
-        # Configura callback para oportunidades
-        self.scanner.set_opportunity_callback(self._on_opportunity_found)
         
         # Configura handlers de sinal para graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -59,7 +58,8 @@ class OpportunityBot:
             logger.info(f"🎯 Oportunidade encontrada em {marketplace}: {item.get('name', 'Unknown')}")
             
             # Posta no Discord
-            await self.discord_poster.post_opportunity(item, marketplace)
+            if self.discord_poster:
+                await self.discord_poster.post_opportunity(item)
             
         except Exception as e:
             logger.error(f"❌ Erro ao processar oportunidade: {e}")
@@ -76,16 +76,23 @@ class OpportunityBot:
             
             # Testa conexão com Supabase
             logger.info("🔍 Testando conexão com Supabase...")
-            if not await self.scanner.supabase.test_connection():
-                logger.error("❌ Falha na conexão com Supabase")
-                return False
+            supabase = SupabaseClient()
+            await supabase.test_connection()
             logger.info("✅ Conexão com Supabase OK")
             
             # Inicializa Discord
             logger.info("🤖 Inicializando Discord...")
-            if not await self.discord_poster.initialize():
-                logger.error("❌ Falha ao inicializar Discord")
-                return False
+            self.discord_poster = DiscordPoster(self.settings)
+            await self.discord_poster.initialize()
+            logger.info("✅ Discord conectado")
+            
+            # Inicializa scanner
+            logger.info("🔄 Inicializando scanner...")
+            self.scanner = MarketplaceScanner(
+                settings=self.settings,
+                discord_poster=self.discord_poster,
+                opportunity_callback=self._on_opportunity_found
+            )
             
             logger.info("✅ Opportunity Bot inicializado com sucesso")
             return True
@@ -119,8 +126,8 @@ class OpportunityBot:
             self.running = True
             logger.info("🔄 Bot iniciado, monitorando oportunidades...")
             
-            # Inicia scanner em background
-            scanner_task = asyncio.create_task(self.scanner.run_forever())
+            # Inicia scanner
+            await self.scanner.start()
             
             # Loop principal
             while self.running:
@@ -129,7 +136,7 @@ class OpportunityBot:
                     await asyncio.sleep(30)
                     
                     # Log de status
-                    if self.scanner.is_connected:
+                    if self.scanner and self.scanner.is_connected:
                         logger.debug("✅ WebSocket conectado, monitorando...")
                     else:
                         logger.warning("⚠️ WebSocket desconectado, tentando reconectar...")
@@ -140,41 +147,14 @@ class OpportunityBot:
             
             # Shutdown graceful
             logger.info("🔄 Iniciando shutdown...")
-            
-            # Remove arquivo PID
-            try:
-                os.remove('bot.pid')
-                logger.info("🗑️ Arquivo PID removido")
-            except:
-                pass
-            
-            # Cancela scanner
-            scanner_task.cancel()
-            try:
-                await scanner_task
-            except asyncio.CancelledError:
-                pass
-            
-            # Cancela servidor de health check
-            health_task.cancel()
-            try:
-                await health_task
-            except asyncio.CancelledError:
-                pass
-            
-            # Desconecta componentes
-            await self.scanner.disconnect()
-            await self.discord_poster.close()
-            
-            logger.info("✅ Shutdown concluído")
+            await self.shutdown()
             
         except Exception as e:
             logger.error(f"❌ Erro fatal no bot: {e}")
         finally:
             # Garante que tudo seja fechado
             try:
-                await self.scanner.disconnect()
-                await self.discord_poster.close()
+                await self.cleanup()
             except:
                 pass
     
@@ -182,6 +162,29 @@ class OpportunityBot:
         """Shutdown manual do bot."""
         logger.info("🔄 Shutdown manual solicitado...")
         self.running = False
+        await self.cleanup()
+    
+    async def cleanup(self):
+        """Limpa recursos."""
+        try:
+            # Remove arquivo PID
+            try:
+                os.remove('bot.pid')
+                logger.info("🗑️ Arquivo PID removido")
+            except:
+                pass
+            
+            # Desconecta componentes
+            if self.scanner:
+                await self.scanner.stop()
+            
+            if self.discord_poster:
+                await self.discord_poster.close()
+            
+            logger.info("✅ Cleanup concluído")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro no cleanup: {e}")
 
 async def main():
     """Função principal."""

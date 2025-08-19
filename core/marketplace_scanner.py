@@ -452,47 +452,35 @@ class MarketplaceScanner:
         # Handler genérico para TODOS os eventos (debug e captura)
         @self.sio.on('*', namespace='/trade')
         async def on_any_event(event, data):
-            """Captura TODOS os eventos para debug e processamento."""
+            """Captura TODOS os eventos para debug e processamento ULTRA-RÁPIDO."""
             try:
-                # Log do evento recebido
-                logger.info(f"📡 EVENTO RECEBIDO: {event}")
-                logger.info(f"📊 Tipo: {type(data)}")
+                # Log do evento recebido (debug)
+                logger.debug(f"📡 EVENTO: {event} - Tipo: {type(data)}")
                 
-                # Se for lista com itens, processa
+                # Se for lista com itens, processa IMEDIATAMENTE
                 if isinstance(data, list) and len(data) > 0:
-                    logger.info(f"📋 LISTA RECEBIDA em '{event}': {len(data)} itens")
-                    
                     # Verifica se parece com lista de itens
                     if isinstance(data[0], dict) and 'id' in data[0]:
                         logger.info(f"🎯 ITENS DETECTADOS em '{event}': {len(data)} itens")
                         
-                        # Processa cada item da lista
-                        for i, item in enumerate(data):
+                        # Processa cada item IMEDIATAMENTE (sem delay)
+                        for item in data:
                             if isinstance(item, dict) and 'id' in item:
-                                item_name = item.get('market_name', item.get('name', 'Unknown'))
-                                item_id = item.get('id', 'Unknown')
-                                logger.info(f"   {i+1}. {item_name} (ID: {item_id})")
+                                # Processa item IMEDIATAMENTE
                                 await self._process_item(item, event)
-                            else:
-                                logger.warning(f"   {i+1}. Item inválido: {type(item)}")
                     
-                    # Se for lista de IDs (deleted_item)
+                    # Se for lista de IDs (deleted_item), apenas loga
                     elif isinstance(data[0], (int, str)):
                         logger.debug(f"🗑️ Lista de IDs em '{event}': {len(data)} itens")
                 
-                # Se for item único, processa
-                elif isinstance(data, dict):
-                    if 'id' in data:
-                        item_name = data.get('market_name', data.get('name', 'Unknown'))
-                        item_id = data.get('id', 'Unknown')
-                        logger.info(f"🎯 ITEM ÚNICO em '{event}': {item_name} (ID: {item_id})")
-                        await self._process_item(data, event)
-                    else:
-                        logger.debug(f"📊 Dados em '{event}': {data}")
-                
-                # Se for outro tipo de dado
-                else:
-                    logger.debug(f"📊 Dados em '{event}': {type(data)} - {data}")
+                # Se for item único, processa IMEDIATAMENTE
+                elif isinstance(data, dict) and 'id' in data:
+                    item_name = data.get('market_name', data.get('name', 'Unknown'))
+                    item_id = data.get('id', 'Unknown')
+                    logger.info(f"🎯 ITEM ÚNICO em '{event}': {item_name} (ID: {item_id})")
+                    
+                    # Processa item IMEDIATAMENTE
+                    await self._process_item(data, event)
                 
                 # Atualiza timestamp de último dado recebido
                 self._update_last_data_received()
@@ -587,74 +575,74 @@ class MarketplaceScanner:
         except Exception as e:
             logger.error(f"Erro ao processar item deletado: {e}")
     
-    async def _process_item(self, data: Dict, event_type: str):
-        """Processa um item recebido do WebSocket."""
+    async def _process_item(self, item: Dict, event_type: str) -> None:
+        """Processa um item recebido."""
         try:
-            item = self._extract_item_data(data)
-            if not item:
+            # FILTRO ULTRA-RÁPIDO DE PREÇO (ANTES de qualquer processamento)
+            if not self._check_basic_price_filter_ultra_fast(item):
+                return  # Sai imediatamente se preço não estiver no range
+            
+            # Log do item sendo processado
+            item_name = item.get('market_name', item.get('name', 'Unknown'))
+            item_id = item.get('id', 'Unknown')
+            logger.info(f"🎯 PROCESSANDO ITEM: {item_name} (ID: {item_id}) - Evento: {event_type}")
+            
+            # Extrai dados básicos do item
+            extracted_item = self._extract_item_data(item)
+            if not extracted_item:
+                logger.warning(f"⚠️ Falha ao extrair dados do item: {item_name}")
                 return
             
-            # Filtro de preço básico (antes de enriquecer com database)
-            if not self._check_basic_price_filter(item):
-                logger.debug(f"Item {item.get('name')} rejeitado pelo filtro de preço básico: ${item.get('price', 0):.2f}")
-                return
+            # Enriquece com dados da database
+            await self._enrich_item_data(extracted_item)
             
-            # Busca informações adicionais da database
-            await self._enrich_item_data(item)
-            
-            # Verifica se passa nos filtros
-            if await self._check_filters(item):
-                logger.info(f"🎯 OPORTUNIDADE ENCONTRADA: {item.get('name')}")
+            # Aplica filtros de oportunidade
+            if await self._apply_opportunity_filters(extracted_item):
+                # Oportunidade encontrada!
+                logger.info(f"🎯 OPORTUNIDADE ENCONTRADA: {extracted_item.get('name')}")
                 
-                # Chama callback de oportunidade
-                if self.opportunity_callback:
-                    await self.opportunity_callback(item, 'csgoempire')
-                else:
-                    logger.warning("⚠️ Callback de oportunidade não configurado")
-            else:
-                logger.debug(f"Item {item.get('name')} não passou nos filtros")
+                # Envia para Discord
+                await self.discord_poster.post_opportunity(extracted_item)
                 
         except Exception as e:
             logger.error(f"❌ Erro ao processar item: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
     
-    def _check_basic_price_filter(self, item: Dict) -> bool:
+    def _check_basic_price_filter_ultra_fast(self, item: Dict) -> bool:
         """
-        Filtro de preço básico aplicado antes de enriquecer com database.
-        Rejeita itens com preços muito baixos ou muito altos.
+        Filtro de preço ULTRA-RÁPIDO aplicado ANTES de qualquer processamento.
+        Evita processar itens caros desnecessariamente.
         """
         try:
-            price_usd = item.get('price')
-            if price_usd is None:
-                logger.debug(f"Item {item.get('name')} sem preço, rejeitando")
+            # Extrai preço em centavos
+            purchase_price_centavos = item.get('purchase_price')
+            if purchase_price_centavos is None:
                 return False
+            
+            # Converte para USD (ultra-rápido)
+            price_usd = (purchase_price_centavos / 100) * self.settings.COIN_TO_USD_FACTOR
             
             # Filtros de preço configurados
             min_price = self.settings.MIN_PRICE
             max_price = self.settings.MAX_PRICE
             
-            # Log detalhado dos valores
-            logger.info(f"🔍 Filtro de preço básico para: {item.get('name')}")
-            logger.info(f"   - Preço do item: ${price_usd:.2f}")
-            logger.info(f"   - MIN_PRICE configurado: ${min_price:.2f}")
-            logger.info(f"   - MAX_PRICE configurado: ${max_price:.2f}")
-            
-            # Verifica preço mínimo
+            # Verifica preço mínimo (ultra-rápido)
             if price_usd < min_price:
-                logger.info(f"❌ Item {item.get('name')} REJEITADO: ${price_usd:.2f} < ${min_price:.2f} (MIN_PRICE)")
+                logger.debug(f"🚫 Item {item.get('market_name', 'Unknown')} REJEITADO: ${price_usd:.2f} < ${min_price:.2f} (MIN_PRICE)")
                 return False
             
-            # Verifica preço máximo
+            # Verifica preço máximo (ultra-rápido)
             if price_usd > max_price:
-                logger.info(f"❌ Item {item.get('name')} REJEITADO: ${price_usd:.2f} > ${max_price:.2f} (MAX_PRICE)")
+                logger.debug(f"🚫 Item {item.get('market_name', 'Unknown')} REJEITADO: ${price_usd:.2f} > ${max_price:.2f} (MAX_PRICE)")
                 return False
             
-            logger.info(f"✅ Item {item.get('name')} ACEITO no filtro de preço básico: ${price_usd:.2f}")
+            # Item passou no filtro de preço básico
+            logger.debug(f"✅ Item {item.get('market_name', 'Unknown')} ACEITO no filtro de preço: ${price_usd:.2f}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Erro ao verificar filtro de preço básico: {e}")
+            logger.error(f"❌ Erro no filtro de preço ultra-rápido: {e}")
             return False
     
     async def _enrich_item_data(self, item: Dict) -> None:
@@ -813,6 +801,32 @@ class MarketplaceScanner:
         except Exception as e:
             logger.error(f"❌ Erro ao fazer parse do nome: {e}")
             return name, False, False, None
+    
+    async def _apply_opportunity_filters(self, item: Dict) -> bool:
+        """
+        Aplica filtros de oportunidade de forma otimizada.
+        Retorna True se o item passar em todos os filtros.
+        """
+        try:
+            # Filtro de lucro
+            profit_filter = ProfitFilter(self.settings.MIN_PROFIT_PERCENTAGE)
+            if not await profit_filter.check(item):
+                logger.debug(f"❌ Item {item.get('name')} REJEITADO pelo filtro de lucro")
+                return False
+            
+            # Filtro de liquidez
+            liquidity_filter = LiquidityFilter(self.settings.MIN_LIQUIDITY_SCORE)
+            if not await liquidity_filter.check(item):
+                logger.debug(f"❌ Item {item.get('name')} REJEITADO pelo filtro de liquidez")
+                return False
+            
+            # Item passou em todos os filtros
+            logger.info(f"✅ Item {item.get('name')} ACEITO em todos os filtros")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao aplicar filtros de oportunidade: {e}")
+            return False
     
     async def _check_filters(self, item: Dict) -> bool:
         """Verifica se o item passa nos filtros configurados."""
@@ -1339,43 +1353,9 @@ class MarketplaceScanner:
             await self.disconnect()
 
     async def start_polling_fallback(self):
-        """Inicia polling como fallback para capturar mais itens."""
-        logger.info("🔄 Iniciando polling de fallback para capturar mais itens...")
-        
-        while True:
-            try:
-                # Verifica se WebSocket está funcionando bem
-                time_since_last_data = time.time() - self._last_data_received
-                
-                # Se não recebeu dados há mais de 2 minutos, faz polling
-                if time_since_last_data > 120:  # 2 minutos
-                    logger.warning(f"⚠️ Sem dados há {time_since_last_data:.0f}s, iniciando polling...")
-                    
-                    # Tenta buscar itens via API como fallback
-                    await self._fetch_items_via_api_fallback()
-                
-                # Aguarda antes da próxima verificação
-                await asyncio.sleep(30)  # Verifica a cada 30 segundos
-                
-            except Exception as e:
-                logger.error(f"❌ Erro no polling de fallback: {e}")
-                await asyncio.sleep(30)
+        """Método removido - foco apenas no WebSocket ultra-rápido."""
+        pass
     
     async def _fetch_items_via_api_fallback(self):
-        """Busca itens via API como fallback quando WebSocket não funciona bem."""
-        try:
-            logger.info("🔍 Buscando itens via API de fallback...")
-            
-            # Aqui você pode implementar uma chamada à API do CSGOEmpire
-            # para buscar itens recentes como fallback
-            
-            # Por enquanto, apenas loga que está tentando
-            logger.info("📡 Tentando buscar itens via API de fallback...")
-            
-            # TODO: Implementar chamada real à API do CSGOEmpire
-            # items = await self.csgoempire_api.get_recent_items()
-            # for item in items:
-            #     await self._process_item(item, 'api_fallback')
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao buscar itens via API de fallback: {e}")
+        """Método removido - foco apenas no WebSocket ultra-rápido."""
+        pass

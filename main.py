@@ -209,15 +209,12 @@ async def main():
             logger.error("❌ Falha na conexão com Supabase")
             return
         
-        # Inicia o bot
+        # Inicia o bot (WebSocket ultra-rápido)
+        logger.info("⚡ Iniciando WebSocket ultra-rápido...")
         await bot.start()
         
-        # Inicia o polling de fallback em paralelo
-        logger.info("🔄 Iniciando polling de fallback...")
-        polling_task = asyncio.create_task(bot.start_polling_fallback())
-        
-        # Aguarda ambas as tarefas
-        await asyncio.gather(health_task, polling_task)
+        # Aguarda apenas o health server
+        await health_task
         
     except KeyboardInterrupt:
         logger.info("🛑 Interrupção recebida, encerrando...")

@@ -185,7 +185,7 @@ async def main():
         # Aguarda health server
         await asyncio.sleep(2)
         
-        # Executa bot
+        # Executa bot robusto
         await bot.run()
         
     except Exception as e:

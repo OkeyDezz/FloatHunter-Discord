@@ -1,6 +1,9 @@
 # Railway Procfile
+# TESTE WEBSOCKET - Testa conexão antes de usar bot completo
+worker: python3 test_websocket.py
+
 # ROBUST BOT MODE - Funcionalidade completa + Robustez máxima
-worker: python3 start_robust_bot.py
+# worker: python3 start_robust_bot.py
 
 # ULTRA SIMPLE MODE - SEMPRE funciona (apenas health check)
 # worker: python3 start_ultra_simple.py

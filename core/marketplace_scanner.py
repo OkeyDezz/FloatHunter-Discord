@@ -140,11 +140,17 @@ class MarketplaceScanner:
                     
                     if isinstance(data, list):
                         logger.info(f"📋 Lista com {len(data)} itens")
-                        for item in data:
+                        for i, item in enumerate(data):
                             if isinstance(item, dict):
+                                item_name = item.get('market_name', item.get('name', f'Item {i+1}'))
+                                item_id = item.get('id', 'Unknown')
+                                logger.info(f"   🆕 {i+1}. {item_name} (ID: {item_id})")
                                 await self._process_item(item, 'new_item')
                     elif isinstance(data, dict):
                         logger.info(f"📋 Item único recebido")
+                        item_name = data.get('market_name', data.get('name', 'Unknown'))
+                        item_id = data.get('id', 'Unknown')
+                        logger.info(f"   🆕 {item_name} (ID: {item_id})")
                         await self._process_item(data, 'new_item')
                     
                     self._update_last_data_received()
@@ -172,8 +178,11 @@ class MarketplaceScanner:
                     
                     if isinstance(data, list):
                         logger.info(f"📋 Lista com {len(data)} itens atualizados")
-                        for item in data:
+                        for i, item in enumerate(data):
                             if isinstance(item, dict):
+                                item_name = item.get('market_name', item.get('name', f'Item {i+1}'))
+                                item_id = item.get('id', 'Unknown')
+                                logger.info(f"   🔄 {i+1}. {item_name} (ID: {item_id})")
                                 await self._process_item(item, 'updated_item')
                     elif isinstance(data, dict):
                         logger.info(f"📋 Item único atualizado")
@@ -191,16 +200,32 @@ class MarketplaceScanner:
                     
                     if isinstance(data, list):
                         logger.info(f"📋 Lista com {len(data)} leilões atualizados")
-                        for item in data:
+                        for i, item in enumerate(data):
                             if isinstance(item, dict):
+                                item_name = item.get('market_name', item.get('name', f'Item {i+1}'))
+                                item_id = item.get('id', 'Unknown')
+                                logger.info(f"   📦 {i+1}. {item_name} (ID: {item_id})")
                                 await self._process_item(item, 'auction_update')
                     elif isinstance(data, dict):
                         logger.info(f"📋 Leilão único atualizado")
+                        item_name = data.get('market_name', data.get('name', 'Unknown'))
+                        item_id = data.get('id', 'Unknown')
+                        logger.info(f"   📦 {item_name} (ID: {item_id})")
                         await self._process_item(data, 'auction_update')
                     
                     self._update_last_data_received()
                 except Exception as e:
                     logger.error(f"❌ Erro ao processar auction_update: {e}")
+            
+            @self.sio.on('err', namespace='/trade')
+            async def on_error(data):
+                """Erro do servidor WebSocket."""
+                try:
+                    logger.warning(f"⚠️ Erro do servidor WebSocket: {data}")
+                    # Não desconecta por erros do servidor
+                    self._update_last_data_received()
+                except Exception as e:
+                    logger.error(f"❌ Erro ao processar evento de erro: {e}")
             
             @self.sio.on('timesync', namespace='/trade')
             async def on_timesync(data):
@@ -220,7 +245,7 @@ class MarketplaceScanner:
                 """Captura TODOS os eventos para debug."""
                 try:
                     # Log apenas eventos que não temos handlers específicos
-                    excluded_events = ['new_item', 'deleted_item', 'updated_item', 'auction_update', 'timesync', 'init', 'updated_seller_online_status']
+                    excluded_events = ['new_item', 'deleted_item', 'updated_item', 'auction_update', 'err', 'timesync', 'init', 'updated_seller_online_status']
                     
                     if event not in excluded_events:
                         logger.info(f"📡 EVENTO NÃO TRATADO: {event} - Tipo: {type(data)}")

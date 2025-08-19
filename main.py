@@ -184,17 +184,54 @@ class OpportunityBot:
         self.running = False
 
 async def main():
-    """Função principal."""
-    bot = OpportunityBot()
-    
+    """Função principal do bot."""
     try:
-        await bot.run()
+        # Salva PID do processo
+        with open('bot.pid', 'w') as f:
+            f.write(str(os.getpid()))
+        logger.info(f"🆔 PID do processo salvo: {os.getpid()}")
+        
+        # Inicia servidor de health check
+        logger.info("🚀 Iniciando servidor de health check...")
+        health_server = HealthServer()
+        health_task = asyncio.create_task(health_server.start())
+        
+        # Aguarda um pouco para o health server inicializar
+        await asyncio.sleep(2)
+        
+        # Inicia Opportunity Bot
+        logger.info("🚀 Iniciando Opportunity Bot...")
+        bot = OpportunityBot()
+        
+        # Testa conexão com Supabase
+        logger.info("🔍 Testando conexão com Supabase...")
+        if not await bot.test_supabase_connection():
+            logger.error("❌ Falha na conexão com Supabase")
+            return
+        
+        # Inicia o bot
+        await bot.start()
+        
+        # Inicia o polling de fallback em paralelo
+        logger.info("🔄 Iniciando polling de fallback...")
+        polling_task = asyncio.create_task(bot.start_polling_fallback())
+        
+        # Aguarda ambas as tarefas
+        await asyncio.gather(health_task, polling_task)
+        
     except KeyboardInterrupt:
-        logger.info("📡 Interrupção do usuário detectada")
-        await bot.shutdown()
+        logger.info("🛑 Interrupção recebida, encerrando...")
     except Exception as e:
-        logger.error(f"❌ Erro fatal: {e}")
-        await bot.shutdown()
+        logger.error(f"❌ Erro na função principal: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+    finally:
+        # Remove arquivo PID
+        try:
+            os.remove('bot.pid')
+            logger.info("🗑️ Arquivo PID removido")
+        except:
+            pass
 
 if __name__ == "__main__":
     try:

@@ -33,10 +33,6 @@ class ProfitFilter:
                 logger.info(f"✅ Item {item.get('name')} ACEITO - lucro {profit_percentage:.2f}% >= {self.min_profit_percentage}%")
             else:
                 logger.info(f"❌ Item {item.get('name')} REJEITADO - lucro {profit_percentage:.2f}% < {self.min_profit_percentage}%")
-                # Durante debug, aceita itens com lucro negativo para verificar se o bot está funcionando
-                if profit_percentage < 0:
-                    logger.info(f"🔍 DEBUG: Aceitando item com lucro negativo para verificar funcionamento")
-                    return True
             
             logger.debug(f"Lucro: {profit_percentage:.2f}% >= {self.min_profit_percentage}% = {result} para {item.get('name')}")
             

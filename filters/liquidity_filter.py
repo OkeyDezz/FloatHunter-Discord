@@ -32,9 +32,6 @@ class LiquidityFilter:
                 logger.info(f"✅ Item {item.get('name')} ACEITO - liquidez {liquidity_score:.1f} >= {self.min_liquidity_score}")
             else:
                 logger.info(f"❌ Item {item.get('name')} REJEITADO - liquidez {liquidity_score:.1f} < {self.min_liquidity_score}")
-                # Durante debug, aceita itens com liquidez baixa para verificar se o bot está funcionando
-                logger.info(f"🔍 DEBUG: Aceitando item com liquidez baixa para verificar funcionamento")
-                return True
     
             logger.debug(f"Liquidez: {liquidity_score:.1f} >= {self.min_liquidity_score} = {result} para {item.get('name')}")
     

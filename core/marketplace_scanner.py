@@ -1337,3 +1337,45 @@ class MarketplaceScanner:
             logger.error(f"❌ Erro fatal no scanner: {e}")
         finally:
             await self.disconnect()
+
+    async def start_polling_fallback(self):
+        """Inicia polling como fallback para capturar mais itens."""
+        logger.info("🔄 Iniciando polling de fallback para capturar mais itens...")
+        
+        while True:
+            try:
+                # Verifica se WebSocket está funcionando bem
+                time_since_last_data = time.time() - self._last_data_received
+                
+                # Se não recebeu dados há mais de 2 minutos, faz polling
+                if time_since_last_data > 120:  # 2 minutos
+                    logger.warning(f"⚠️ Sem dados há {time_since_last_data:.0f}s, iniciando polling...")
+                    
+                    # Tenta buscar itens via API como fallback
+                    await self._fetch_items_via_api_fallback()
+                
+                # Aguarda antes da próxima verificação
+                await asyncio.sleep(30)  # Verifica a cada 30 segundos
+                
+            except Exception as e:
+                logger.error(f"❌ Erro no polling de fallback: {e}")
+                await asyncio.sleep(30)
+    
+    async def _fetch_items_via_api_fallback(self):
+        """Busca itens via API como fallback quando WebSocket não funciona bem."""
+        try:
+            logger.info("🔍 Buscando itens via API de fallback...")
+            
+            # Aqui você pode implementar uma chamada à API do CSGOEmpire
+            # para buscar itens recentes como fallback
+            
+            # Por enquanto, apenas loga que está tentando
+            logger.info("📡 Tentando buscar itens via API de fallback...")
+            
+            # TODO: Implementar chamada real à API do CSGOEmpire
+            # items = await self.csgoempire_api.get_recent_items()
+            # for item in items:
+            #     await self._process_item(item, 'api_fallback')
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao buscar itens via API de fallback: {e}")

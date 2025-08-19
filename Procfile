@@ -1,6 +1,9 @@
 # Railway Procfile
+# BOT PRINCIPAL - Bot limpo e novo com cliente CSGOEmpire
+worker: python3 bot_main.py
+
 # TESTE SIMPLES - Script que SEMPRE funciona e testa WebSocket
-worker: python3 test_simple.py
+# worker: python3 test_simple.py
 
 # TESTE WEBSOCKET - Testa conexão antes de usar bot completo
 # worker: python3 test_websocket.py

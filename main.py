@@ -6,16 +6,21 @@ import asyncio
 import logging
 import signal
 import sys
-import os
 from datetime import datetime
 from typing import Dict
 
-# Configuração de logging básica
+from config.settings import Settings
+from core.marketplace_scanner import MarketplaceScanner
+from core.discord_poster import DiscordPoster
+from health_server import HealthServer
+
+# Configuração de logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout)
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('opportunity_bot.log') if Settings().LOG_TO_FILE else logging.NullHandler()
     ]
 )
 
@@ -25,8 +30,13 @@ class OpportunityBot:
     """Bot principal de detecção de oportunidades."""
     
     def __init__(self):
-        self.running = True  # Sempre True por padrão
-        self.should_stop = False  # Nova variável para controle
+        self.settings = Settings()
+        self.scanner = MarketplaceScanner()
+        self.discord_poster = DiscordPoster()
+        self.running = False
+        
+        # Configura callback para oportunidades
+        self.scanner.set_opportunity_callback(self._on_opportunity_found)
         
         # Configura handlers de sinal para graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -35,136 +45,162 @@ class OpportunityBot:
     def _signal_handler(self, signum, frame):
         """Handler para sinais de shutdown."""
         logger.info(f"📡 Sinal {signum} recebido, iniciando shutdown...")
-        self.should_stop = True
+        self.running = False
+    
+    async def _on_opportunity_found(self, item: Dict, marketplace: str):
+        """
+        Callback chamado quando uma oportunidade é encontrada.
+        
+        Args:
+            item: Dados do item
+            marketplace: Nome do marketplace
+        """
+        try:
+            logger.info(f"🎯 Oportunidade encontrada em {marketplace}: {item.get('name', 'Unknown')}")
+            
+            # Posta no Discord
+            await self.discord_poster.post_opportunity(item, marketplace)
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao processar oportunidade: {e}")
     
     async def initialize(self) -> bool:
         """Inicializa o bot."""
         try:
-            logger.info("🚀 Iniciando Opportunity Bot (modo minimalista)...")
+            logger.info("🚀 Iniciando Opportunity Bot...")
             
-            # Modo minimalista - sempre funciona
-            logger.info("✅ Bot inicializado em modo minimalista")
+            # Valida configurações
+            if not self.settings.validate():
+                logger.error("❌ Configurações inválidas")
+                return False
+            
+            # Testa conexão com Supabase
+            logger.info("🔍 Testando conexão com Supabase...")
+            if not await self.scanner.supabase.test_connection():
+                logger.error("❌ Falha na conexão com Supabase")
+                return False
+            logger.info("✅ Conexão com Supabase OK")
+            
+            # Inicializa Discord
+            logger.info("🤖 Inicializando Discord...")
+            if not await self.discord_poster.initialize():
+                logger.error("❌ Falha ao inicializar Discord")
+                return False
+            
+            logger.info("✅ Opportunity Bot inicializado com sucesso")
             return True
             
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar bot: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def run(self):
         """Executa o bot."""
         try:
-            logger.info("🔄 Bot iniciado, modo minimalista ativo...")
+            # Salva PID do processo para restart automático
+            import os
+            pid = os.getpid()
+            with open('bot.pid', 'w') as f:
+                f.write(str(pid))
+            logger.info(f"🆔 PID do processo salvo: {pid}")
             
-            # Loop principal VERDADEIRAMENTE infinito
-            while True:  # NUNCA para - ignora sinais
+            # Inicia servidor de health check IMEDIATAMENTE
+            logger.info("🚀 Iniciando servidor de health check...")
+            health_server = HealthServer()
+            health_task = asyncio.create_task(health_server.start())
+            
+            # Aguarda um pouco para o health server inicializar
+            await asyncio.sleep(2)
+            
+            if not await self.initialize():
+                logger.error("❌ Falha na inicialização, encerrando...")
+                return
+            
+            self.running = True
+            logger.info("🔄 Bot iniciado, monitorando oportunidades...")
+            
+            # Inicia scanner em background
+            scanner_task = asyncio.create_task(self.scanner.run_forever())
+            
+            # Loop principal
+            while self.running:
                 try:
-                    # Log de status a cada 30 segundos
+                    # Verifica status a cada 30 segundos
                     await asyncio.sleep(30)
-                    logger.info("💓 Bot ativo - health check funcionando")
                     
-                    # Só verifica sinal de parada se explicitamente solicitado
-                    if self.should_stop:
-                        logger.info("🔄 Shutdown explícito solicitado...")
-                        break
+                    # Log de status
+                    if self.scanner.is_connected:
+                        logger.debug("✅ WebSocket conectado, monitorando...")
+                    else:
+                        logger.warning("⚠️ WebSocket desconectado, tentando reconectar...")
                     
                 except Exception as e:
                     logger.error(f"❌ Erro no loop principal: {e}")
                     await asyncio.sleep(5)
-                    # Continua rodando SEMPRE
             
-            # Shutdown graceful (só se should_stop for True)
-            logger.info("🔄 Iniciando shutdown graceful...")
-            await self.shutdown()
+            # Shutdown graceful
+            logger.info("🔄 Iniciando shutdown...")
+            
+            # Remove arquivo PID
+            try:
+                os.remove('bot.pid')
+                logger.info("🗑️ Arquivo PID removido")
+            except:
+                pass
+            
+            # Cancela scanner
+            scanner_task.cancel()
+            try:
+                await scanner_task
+            except asyncio.CancelledError:
+                pass
+            
+            # Cancela servidor de health check
+            health_task.cancel()
+            try:
+                await health_task
+            except asyncio.CancelledError:
+                pass
+            
+            # Desconecta componentes
+            await self.scanner.disconnect()
+            await self.discord_poster.close()
+            
+            logger.info("✅ Shutdown concluído")
             
         except Exception as e:
             logger.error(f"❌ Erro fatal no bot: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            
-            # Loop de emergência - ABSOLUTAMENTE infinito
-            logger.info("🚨 Entrando em modo de emergência...")
-            while True:
-                await asyncio.sleep(30)
-                logger.info("🚨 Modo de emergência - processo SEMPRE vivo")
+        finally:
+            # Garante que tudo seja fechado
+            try:
+                await self.scanner.disconnect()
+                await self.discord_poster.close()
+            except:
+                pass
     
     async def shutdown(self):
-        """Shutdown graceful do bot."""
-        try:
-            logger.info("🔄 Shutdown em andamento...")
-            self.running = False
-            logger.info("✅ Shutdown concluído")
-        except Exception as e:
-            logger.error(f"❌ Erro durante shutdown: {e}")
+        """Shutdown manual do bot."""
+        logger.info("🔄 Shutdown manual solicitado...")
+        self.running = False
 
 async def main():
     """Função principal."""
+    bot = OpportunityBot()
+    
     try:
-        logger.info("🚀 Iniciando Opportunity Bot...")
-        
-        # Inicia health server IMEDIATAMENTE
-        logger.info("🏥 Iniciando servidor de health check...")
-        try:
-            from health_server import HealthServer
-            health_server = HealthServer()
-            health_task = asyncio.create_task(health_server.start())
-            logger.info("✅ Health server iniciado")
-        except Exception as e:
-            logger.error(f"❌ Falha ao iniciar health server: {e}")
-            # Continua mesmo sem health server
-        
-        # Aguarda inicialização do health server
-        await asyncio.sleep(2)
-        
-        # Inicia bot
-        bot = OpportunityBot()
-        logger.info("🤖 Bot criado - forçando running=True...")
-        bot.running = True  # FORÇA running = True
-        bot.should_stop = False  # FORÇA should_stop = False
-        
-        if await bot.initialize():
-            logger.info("🤖 Bot inicializado com sucesso - iniciando loop principal...")
-            logger.info(f"🔍 Estado do bot: running={bot.running}, should_stop={bot.should_stop}")
-            
-            # Loop principal do bot
-            try:
-                await bot.run()
-            except Exception as e:
-                logger.error(f"❌ Erro no loop principal: {e}")
-                # Continua rodando mesmo com erro
-                while True:
-                    await asyncio.sleep(30)
-                    logger.info("ℹ️ Bot em modo de recuperação - aguardando...")
-        else:
-            logger.error("❌ Falha na inicialização do bot")
-            # Mantém health check rodando mesmo se bot falhar
-            while True:
-                await asyncio.sleep(30)
-                logger.info("ℹ️ Health check ativo, bot em modo de espera")
-                
+        await bot.run()
+    except KeyboardInterrupt:
+        logger.info("📡 Interrupção do usuário detectada")
+        await bot.shutdown()
     except Exception as e:
-        logger.error(f"❌ Erro fatal na aplicação: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Loop de emergência para manter processo vivo
-        while True:
-            await asyncio.sleep(30)
-            logger.info("🚨 Modo de emergência - processo mantido vivo")
+        logger.error(f"❌ Erro fatal: {e}")
+        await bot.shutdown()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("📡 Interrupção por teclado")
+        print("\n📡 Bot interrompido pelo usuário")
     except Exception as e:
-        logger.error(f"❌ Erro fatal: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Loop de emergência síncrono
-        while True:
-            import time
-            time.sleep(30)
-            print("🚨 Modo de emergência síncrono - processo mantido vivo")
+        print(f"❌ Erro fatal: {e}")
+        sys.exit(1)

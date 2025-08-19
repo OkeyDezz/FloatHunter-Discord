@@ -1,99 +1,45 @@
 #!/usr/bin/env python3
 """
-Start Health - Script ultra-simples para iniciar apenas o health check.
-SEMPRE funciona, mesmo com erros de configuração.
+Script de startup que inicia apenas o health server primeiro.
+Útil para Railway que precisa de um endpoint de health check funcionando imediatamente.
 """
 
 import asyncio
 import logging
+import os
 import sys
-import time
+from health_server import HealthServer
 
-# Configuração de logging básica
+# Configura logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-
 logger = logging.getLogger(__name__)
 
-async def start_health_server():
-    """Inicia apenas o servidor de health check."""
-    try:
-        logger.info("🏥 Iniciando servidor de health check...")
-        
-        # Tenta importar o health server
-        try:
-            from health_server import HealthServer
-            health_server = HealthServer()
-            logger.info("✅ Health server importado com sucesso")
-        except Exception as e:
-            logger.error(f"❌ Falha ao importar health server: {e}")
-            return False
-        
-        # Inicia o health server
-        try:
-            await health_server.start()
-            logger.info("✅ Health server iniciado com sucesso")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Falha ao iniciar health server: {e}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"❌ Erro fatal ao iniciar health server: {e}")
-        return False
-
 async def main():
-    """Função principal."""
+    """Inicia apenas o health server."""
     try:
-        logger.info("🚀 Iniciando modo health check apenas...")
+        logger.info("🚀 Iniciando servidor de health check...")
         
         # Inicia health server
-        if await start_health_server():
-            logger.info("✅ Health server funcionando - aguardando...")
+        server = HealthServer()
+        if await server.start():
+            logger.info("✅ Health server iniciado com sucesso!")
+            logger.info("📊 Endpoint disponível em: /health")
             
-            # Loop infinito para manter o processo vivo
+            # Mantém rodando
             while True:
-                await asyncio.sleep(30)
-                logger.info("💓 Health check ativo - processo vivo")
-                
+                await asyncio.sleep(1)
         else:
-            logger.error("❌ Health server falhou - modo de emergência")
+            logger.error("❌ Falha ao iniciar health server")
+            sys.exit(1)
             
-            # Modo de emergência - mantém processo vivo
-            while True:
-                await asyncio.sleep(30)
-                logger.warning("🚨 Modo de emergência - processo mantido vivo")
-                
-    except Exception as e:
-        logger.error(f"❌ Erro fatal na aplicação: {e}")
-        
-        # Loop de emergência síncrono
-        while True:
-            time.sleep(30)
-            print("🚨 Modo de emergência síncrono - processo mantido vivo")
-                
-    except Exception as e:
-        logger.error(f"❌ Erro fatal na aplicação: {e}")
-        
-        # Loop de emergência síncrono
-        while True:
-            time.sleep(30)
-            print("🚨 Modo de emergência síncrono - processo mantido vivo")
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("📡 Interrupção por teclado")
+        logger.info("🛑 Interrupção do usuário")
     except Exception as e:
         logger.error(f"❌ Erro fatal: {e}")
-        
-        # Loop de emergência síncrono
-        while True:
-            time.sleep(30)
-            print("🚨 Modo de emergência síncrono - processo mantido vivo")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    asyncio.run(main())

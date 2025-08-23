@@ -31,3 +31,4 @@ fi
 rm -f "$CRON_FILE"
 
 echo "🚀 Configuração concluída!"
+

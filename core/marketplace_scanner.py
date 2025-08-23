@@ -90,6 +90,7 @@ class MarketplaceScanner:
                 """Novo item disponível - APENAS este evento."""
                 try:
                     logger.info(f"🆕 NOVO ITEM RECEBIDO: {type(data)}")
+                    logger.info(f"🆕 Dados brutos: {data}")
                     
                     if isinstance(data, list):
                         logger.info(f"📋 Lista com {len(data)} itens")
@@ -102,7 +103,7 @@ class MarketplaceScanner:
                     elif isinstance(data, dict):
                         logger.info(f"📋 Item único recebido")
                         item_name = data.get('market_name', data.get('name', 'Unknown'))
-                        item_id = item.get('id', 'Unknown')
+                        item_id = data.get('id', 'Unknown')
                         logger.info(f"   🆕 {item_name} (ID: {item_id})")
                         await self._process_item(data, 'new_item')
                     
@@ -147,6 +148,13 @@ class MarketplaceScanner:
                 except Exception as e:
                     logger.error(f"❌ Erro ao processar evento init: {e}")
             
+            # Handler para TODOS os eventos (debug)
+            @self.sio.on('*', namespace='/trade')
+            async def on_any_event(event, data):
+                """Handler para qualquer evento (debug)."""
+                if event not in ['connect', 'disconnect', 'connect_error']:
+                    logger.info(f"📡 EVENTO RECEBIDO: {event} - Dados: {data}")
+            
             logger.info("✅ Handlers de eventos configurados")
             
         except Exception as e:
@@ -169,16 +177,29 @@ class MarketplaceScanner:
                 "User-Agent": "Mozilla/5.0"
             }
             
+            logger.info(f"🔍 Obtendo metadata de: {url}")
+            logger.info(f"🔍 Headers: {headers}")
+            
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
+                    logger.info(f"📡 Resposta da API: {response.status}")
+                    
                     if response.status == 200:
                         data = await response.json()
+                        logger.info(f"📡 Dados recebidos: {data}")
+                        
                         js_data = data.get('data') or data
                         
                         self.user_id = js_data.get('user', {}).get('id')
                         self.socket_token = js_data.get('socket_token')
                         self.socket_signature = js_data.get('socket_signature') or js_data.get('token_signature')
                         self.user_model = js_data.get('user')
+                        
+                        logger.info(f"🔍 Dados extraídos:")
+                        logger.info(f"   - User ID: {self.user_id}")
+                        logger.info(f"   - Socket Token: {self.socket_token[:10] if self.socket_token else 'None'}...")
+                        logger.info(f"   - Socket Signature: {self.socket_signature[:10] if self.socket_signature else 'None'}...")
+                        logger.info(f"   - User Model: {'Presente' if self.user_model else 'Ausente'}")
                         
                         if all([self.user_id, self.socket_token, self.socket_signature, self.user_model]):
                             logger.info("✅ Metadata obtida com sucesso")
@@ -187,11 +208,15 @@ class MarketplaceScanner:
                             logger.error("❌ Dados de autenticação incompletos")
                             return False
                     else:
+                        error_text = await response.text()
                         logger.error(f"❌ Erro ao obter metadata: {response.status}")
+                        logger.error(f"❌ Resposta: {error_text}")
                         return False
                         
         except Exception as e:
             logger.error(f"❌ Erro ao obter metadata: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def _connect_websocket(self) -> bool:
@@ -232,6 +257,8 @@ class MarketplaceScanner:
                 
         except Exception as e:
             logger.error(f"❌ Erro ao conectar WebSocket: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def _configure_websocket(self):
@@ -244,12 +271,15 @@ class MarketplaceScanner:
             
             # Emite identify conforme documentação oficial
             logger.info("🆔 Emitindo identify para autenticação...")
-            await self.sio.emit('identify', {
+            identify_payload = {
                 'uid': self.user_id,
                 'authorizationToken': self.socket_token,
                 'signature': self.socket_signature,
                 'uuid': str(uuid.uuid4())
-            }, namespace='/trade')
+            }
+            logger.info(f"🆔 Payload identify: {identify_payload}")
+            
+            await self.sio.emit('identify', identify_payload, namespace='/trade')
             
             # Aguarda autenticação
             logger.info("⏳ Aguardando autenticação...")
@@ -257,17 +287,23 @@ class MarketplaceScanner:
             
             # Configura APENAS evento new_item
             logger.info("📤 Configurando APENAS evento new_item...")
-            await self.sio.emit('allowedEvents', {
+            allowed_events_payload = {
                 'events': ['new_item']
-            }, namespace='/trade')
+            }
+            logger.info(f"📤 Payload allowedEvents: {allowed_events_payload}")
+            
+            await self.sio.emit('allowedEvents', allowed_events_payload, namespace='/trade')
             logger.info("📤 Evento permitido: new_item")
             
             # Configura filtros básicos
             logger.info("📤 Configurando filtros básicos...")
-            await self.sio.emit('filters', {
-                'price_min': self.settings.MIN_PRICE,
-                'price_max': self.settings.MAX_PRICE
-            }, namespace='/trade')
+            filters_payload = {
+                'price_min': int(self.settings.MIN_PRICE * 100 / self.settings.COIN_TO_USD_FACTOR),  # Converte para centavos
+                'price_max': int(self.settings.MAX_PRICE * 100 / self.settings.COIN_TO_USD_FACTOR)   # Converte para centavos
+            }
+            logger.info(f"📤 Payload filters: {filters_payload}")
+            
+            await self.sio.emit('filters', filters_payload, namespace='/trade')
             logger.info("📤 Filtros configurados: preço apenas")
             
             # NÃO marca como autenticado aqui - aguarda confirmação do servidor
@@ -319,13 +355,17 @@ class MarketplaceScanner:
     async def _process_item(self, item: Dict, event_type: str) -> None:
         """Processa um item recebido."""
         try:
+            logger.info(f"🔍 Processando item: {item.get('market_name', item.get('name', 'Unknown'))}")
+            
             # Filtro básico de preço (ultra-rápido)
             if not self._check_basic_price_filter(item):
+                logger.info(f"🚫 Item {item.get('market_name', 'Unknown')} REJEITADO pelo filtro de preço")
                 return
             
             # Extrai dados básicos
             extracted_item = self._extract_item_data(item)
             if not extracted_item:
+                logger.warning(f"⚠️ Falha ao extrair dados do item")
                 return
             
             # Enriquece com dados da database
@@ -335,6 +375,8 @@ class MarketplaceScanner:
             if await self._apply_opportunity_filters(extracted_item):
                 logger.info(f"🎯 OPORTUNIDADE ENCONTRADA: {extracted_item.get('name')}")
                 await self.discord_poster.post_opportunity(extracted_item)
+            else:
+                logger.info(f"❌ Item {extracted_item.get('name')} REJEITADO pelos filtros de oportunidade")
                 
         except Exception as e:
             logger.error(f"❌ Erro ao processar item: {e}")
@@ -346,6 +388,7 @@ class MarketplaceScanner:
         try:
             purchase_price_centavos = item.get('purchase_price')
             if purchase_price_centavos is None:
+                logger.debug(f"🚫 Item {item.get('market_name', 'Unknown')} REJEITADO: purchase_price não encontrado")
                 return False
             
             # Converte centavos para USD
@@ -374,6 +417,7 @@ class MarketplaceScanner:
             purchase_price = data.get('purchase_price')
             
             if not all([item_id, market_name, purchase_price]):
+                logger.warning(f"⚠️ Dados incompletos do item: id={item_id}, market_name={market_name}, purchase_price={purchase_price}")
                 return None
             
             # Parse do nome do item
@@ -567,6 +611,8 @@ class MarketplaceScanner:
                                 logger.warning("⚠️ Conexão perdida, tentando reconectar...")
                                 break
                             
+                            # Log de status a cada 30 segundos
+                            logger.info(f"🔍 Status: WebSocket={self.sio.connected}, Auth={self.authenticated}, Aguardando eventos...")
                             await asyncio.sleep(30)
                         
                         # Aguarda antes de reconectar

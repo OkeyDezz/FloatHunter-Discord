@@ -73,3 +73,4 @@ else
 fi
 
 echo "$(date): Restart automático concluído" >> "$LOG_FILE"
+

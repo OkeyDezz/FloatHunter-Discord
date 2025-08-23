@@ -136,17 +136,34 @@ class MarketplaceScanner:
                     
                     if isinstance(data, dict):
                         auth_status = data.get('authenticated', False)
+                        is_guest = data.get('isGuest', True)
+                        server_info = data.get('server', 'Unknown')
+                        
+                        logger.info(f"📡 Status de autenticação:")
+                        logger.info(f"   - Authenticated: {auth_status}")
+                        logger.info(f"   - Is Guest: {is_guest}")
+                        logger.info(f"   - Server: {server_info}")
+                        
                         if auth_status:
                             logger.info("✅ Autenticação confirmada pelo servidor")
                             self.authenticated = True
                         else:
                             logger.warning("⚠️ Servidor indica que não está autenticado")
+                            if is_guest:
+                                logger.warning("⚠️ Usuário marcado como guest - problema de autenticação")
                             self.authenticated = False
+                            
+                            # Se não estiver autenticado, tenta reautenticar
+                            logger.info("🔄 Tentando reautenticar...")
+                            await asyncio.sleep(2)
+                            await self._reauthenticate()
                     else:
                         logger.info(f"📡 Evento init recebido (tipo: {type(data)})")
                         
                 except Exception as e:
                     logger.error(f"❌ Erro ao processar evento init: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
             
             # Handler para TODOS os eventos (debug)
             @self.sio.on('*', namespace='/trade')
@@ -246,10 +263,15 @@ class MarketplaceScanner:
             logger.info("🔌 WebSocket conectado ao namespace /trade")
             
             # Aguarda estabilizar
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
             
             if not self.sio.connected:
                 logger.error("❌ WebSocket desconectado após conexão")
+                return False
+            
+            # Verifica se o namespace /trade está conectado
+            if '/trade' not in self.sio.connected_namespaces:
+                logger.error("❌ Namespace /trade não está conectado")
                 return False
             
             logger.info("✅ WebSocket conectado com sucesso")
@@ -266,8 +288,19 @@ class MarketplaceScanner:
         try:
             logger.info("🔧 Configurando WebSocket após conexão...")
             
-            # Aguarda estabilizar
-            await asyncio.sleep(1)
+            # Aguarda estabilizar e verifica se o namespace está conectado
+            await asyncio.sleep(2)
+            
+            # Verifica se o namespace /trade está conectado
+            if '/trade' not in self.sio.connected_namespaces:
+                logger.error("❌ Namespace /trade não está conectado, aguardando...")
+                # Aguarda mais um pouco e tenta novamente
+                await asyncio.sleep(3)
+                if '/trade' not in self.sio.connected_namespaces:
+                    logger.error("❌ Namespace /trade ainda não está conectado")
+                    return
+            
+            logger.info("✅ Namespace /trade está conectado, prosseguindo com configuração...")
             
             # Emite identify conforme documentação oficial
             logger.info("🆔 Emitindo identify para autenticação...")
@@ -283,7 +316,7 @@ class MarketplaceScanner:
             
             # Aguarda autenticação
             logger.info("⏳ Aguardando autenticação...")
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)  # Aumentei o tempo de espera
             
             # Configura APENAS evento new_item
             logger.info("📤 Configurando APENAS evento new_item...")
@@ -297,11 +330,18 @@ class MarketplaceScanner:
             
             # Configura filtros básicos
             logger.info("📤 Configurando filtros básicos...")
+            
+            # Converte preços para centavos corretamente
+            # CSGOEmpire usa centavos, então multiplicamos por 100
+            price_min_centavos = int(self.settings.MIN_PRICE * 100)
+            price_max_centavos = int(self.settings.MAX_PRICE * 100)
+            
             filters_payload = {
-                'price_min': int(self.settings.MIN_PRICE * 100 / self.settings.COIN_TO_USD_FACTOR),  # Converte para centavos
-                'price_max': int(self.settings.MAX_PRICE * 100 / self.settings.COIN_TO_USD_FACTOR)   # Converte para centavos
+                'price_min': price_min_centavos,
+                'price_max': price_max_centavos
             }
             logger.info(f"📤 Payload filters: {filters_payload}")
+            logger.info(f"📤 Preços convertidos: ${self.settings.MIN_PRICE:.2f} - ${self.settings.MAX_PRICE:.2f} → {price_min_centavos} - {price_max_centavos} centavos")
             
             await self.sio.emit('filters', filters_payload, namespace='/trade')
             logger.info("📤 Filtros configurados: preço apenas")
@@ -325,6 +365,36 @@ class MarketplaceScanner:
             
         except Exception as e:
             logger.error(f"❌ Erro ao configurar WebSocket: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    async def _reauthenticate(self):
+        """Tenta reautenticar o usuário."""
+        try:
+            logger.info("🔄 Tentando reautenticação...")
+            
+            # Obtém nova metadata (pode ter expirado)
+            if await self._get_socket_metadata():
+                logger.info("✅ Nova metadata obtida, tentando identificar...")
+                
+                # Emite identify novamente
+                identify_payload = {
+                    'uid': self.user_id,
+                    'authorizationToken': self.socket_token,
+                    'signature': self.socket_signature,
+                    'uuid': str(uuid.uuid4())
+                }
+                
+                await self.sio.emit('identify', identify_payload, namespace='/trade')
+                logger.info("🔄 Identify reenviado, aguardando resposta...")
+                
+                # Aguarda um pouco para ver se funciona
+                await asyncio.sleep(3)
+            else:
+                logger.error("❌ Falha ao obter nova metadata para reautenticação")
+                
+        except Exception as e:
+            logger.error(f"❌ Erro durante reautenticação: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
     
@@ -388,11 +458,11 @@ class MarketplaceScanner:
         try:
             purchase_price_centavos = item.get('purchase_price')
             if purchase_price_centavos is None:
-                logger.debug(f"🚫 Item {item.get('market_name', 'Unknown')} REJEITADO: purchase_price não encontrado")
                 return False
             
             # Converte centavos para USD
-            price_usd = (purchase_price_centavos / 100) * self.settings.COIN_TO_USD_FACTOR
+            # CSGOEmpire usa centavos diretamente, não precisa do fator de conversão aqui
+            price_usd = purchase_price_centavos / 100
             
             if price_usd < self.settings.MIN_PRICE:
                 logger.debug(f"🚫 Item {item.get('market_name', 'Unknown')} REJEITADO: ${price_usd:.2f} < ${self.settings.MIN_PRICE:.2f}")
@@ -424,7 +494,8 @@ class MarketplaceScanner:
             base_name, is_stattrak, is_souvenir, condition = self._parse_market_hash_name(market_name)
             
             # Converte preço de centavos para USD
-            price_usd = (purchase_price / 100) * self.settings.COIN_TO_USD_FACTOR
+            # CSGOEmpire usa centavos diretamente, não precisa do fator de conversão
+            price_usd = purchase_price / 100
             
             logger.info(f"💰 Item: {market_name}")
             logger.info(f"   - Base: {base_name}")
@@ -607,9 +678,18 @@ class MarketplaceScanner:
                         
                         # Loop de monitoramento
                         while True:
-                            if not self.sio.connected or not self.authenticated:
-                                logger.warning("⚠️ Conexão perdida, tentando reconectar...")
+                            if not self.sio.connected:
+                                logger.warning("⚠️ WebSocket desconectado, tentando reconectar...")
                                 break
+                            
+                            if not self.authenticated:
+                                logger.warning("⚠️ Não autenticado, tentando reautenticar...")
+                                await self._reauthenticate()
+                                
+                                # Se ainda não estiver autenticado após algumas tentativas, reconecta
+                                if not self.authenticated:
+                                    logger.warning("⚠️ Reautenticação falhou, reconectando...")
+                                    break
                             
                             # Log de status a cada 30 segundos
                             logger.info(f"🔍 Status: WebSocket={self.sio.connected}, Auth={self.authenticated}, Aguardando eventos...")

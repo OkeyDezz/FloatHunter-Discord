@@ -140,6 +140,15 @@ SCAN_INTERVAL_SECONDS=30
 - Problema de autenticação com CSGOEmpire
 - Verifique se a API key tem permissões de WebSocket
 
+**❌ "Namespace /trade não está conectado"**
+- Problema de conexão WebSocket
+- Execute o teste de autenticação: `python test_auth.py`
+
+**❌ "Usuário marcado como guest"**
+- **PROBLEMA CRÍTICO**: Falha na autenticação WebSocket
+- O servidor não reconhece o bot como usuário autenticado
+- Execute: `python test_auth.py` para diagnosticar
+
 #### 3. Teste localmente primeiro
 ```bash
 # Execute o script de teste
@@ -148,6 +157,18 @@ python test_bot.py
 # Se os testes passarem, execute o bot
 python main.py
 ```
+
+#### 4. Teste específico de autenticação WebSocket
+```bash
+# Teste apenas a autenticação WebSocket
+python test_auth.py
+```
+
+Este script testa especificamente:
+- ✅ Obtenção de metadata da API
+- ✅ Conexão WebSocket
+- ✅ Autenticação com o servidor
+- ✅ Recebimento de eventos
 
 ### Logs importantes para monitorar
 
@@ -180,7 +201,8 @@ opportunity-bot/
 ├── config/
 │   └── settings.py              # Configurações
 ├── main.py                      # Ponto de entrada
-├── test_bot.py                  # Script de teste
+├── test_bot.py                  # Script de teste geral
+├── test_auth.py                 # Script de teste de autenticação
 ├── health_server.py             # Servidor de health check
 └── requirements.txt             # Dependências
 ```
@@ -218,9 +240,10 @@ LOG_TO_FILE=true
 Se encontrar problemas:
 
 1. **Execute o script de teste**: `python test_bot.py`
-2. **Verifique os logs** no Railway
-3. **Confirme as variáveis de ambiente**
-4. **Teste localmente** antes do deploy
+2. **Teste a autenticação**: `python test_auth.py`
+3. **Verifique os logs** no Railway
+4. **Confirme as variáveis de ambiente**
+5. **Teste localmente** antes do deploy
 
 ## 📄 Licença
 

@@ -156,7 +156,7 @@ class WebSocketAuthTester:
                 logger.error("❌ WebSocket desconectado após conexão")
                 return False
             
-            if '/trade' not in self.sio.connected_namespaces:
+            if '/trade' not in self.sio.connection_namespaces:
                 logger.error("❌ Namespace /trade não está conectado")
                 return False
             
@@ -174,26 +174,33 @@ class WebSocketAuthTester:
         try:
             logger.info("🆔 Emitindo identify para autenticação...")
             
-            identify_payload = {
-                'uid': self.user_id,
-                'authorizationToken': self.socket_token,
-                'signature': self.socket_signature,
-                'uuid': str(uuid.uuid4())
-            }
+            # Tenta autenticar várias vezes
+            for attempt in range(3):
+                logger.info(f"🔄 Tentativa de autenticação {attempt + 1}/3")
+                
+                identify_payload = {
+                    'uid': self.user_id,
+                    'authorizationToken': self.socket_token,
+                    'signature': self.socket_signature,
+                    'uuid': str(uuid.uuid4())
+                }
+                
+                logger.info(f"🆔 Payload identify: {identify_payload}")
+                
+                await self.sio.emit('identify', identify_payload, namespace='/trade')
+                
+                logger.info("⏳ Aguardando autenticação...")
+                await asyncio.sleep(5)
+                
+                if self.authenticated:
+                    logger.info("✅ Autenticação bem-sucedida!")
+                    return True
+                else:
+                    logger.warning(f"⚠️ Tentativa {attempt + 1} falhou, tentando novamente...")
+                    await asyncio.sleep(2)
             
-            logger.info(f"🆔 Payload identify: {identify_payload}")
-            
-            await self.sio.emit('identify', identify_payload, namespace='/trade')
-            
-            logger.info("⏳ Aguardando autenticação...")
-            await asyncio.sleep(5)
-            
-            if self.authenticated:
-                logger.info("✅ Autenticação bem-sucedida!")
-                return True
-            else:
-                logger.warning("⚠️ Autenticação falhou")
-                return False
+            logger.error("❌ Todas as tentativas de autenticação falharam")
+            return False
                 
         except Exception as e:
             logger.error(f"❌ Erro durante autenticação: {e}")
@@ -216,7 +223,28 @@ class WebSocketAuthTester:
             
             # 3. Tenta autenticar
             if not await self.authenticate():
-                return False
+                logger.warning("⚠️ Primeira tentativa de autenticação falhou")
+                logger.info("🔄 Tentando obter nova metadata (token pode ter expirado)...")
+                
+                # Tenta obter nova metadata e reconectar
+                if await self.get_metadata():
+                    logger.info("✅ Nova metadata obtida, reconectando...")
+                    await self.sio.disconnect()
+                    await asyncio.sleep(2)
+                    
+                    if await self.connect_websocket():
+                        logger.info("🔄 Tentando autenticar com nova metadata...")
+                        if await self.authenticate():
+                            logger.info("✅ Autenticação bem-sucedida com nova metadata!")
+                        else:
+                            logger.error("❌ Autenticação falhou mesmo com nova metadata")
+                            return False
+                    else:
+                        logger.error("❌ Falha ao reconectar com nova metadata")
+                        return False
+                else:
+                    logger.error("❌ Falha ao obter nova metadata")
+                    return False
             
             # 4. Aguarda um pouco para ver se recebe eventos
             logger.info("⏳ Aguardando eventos por 10 segundos...")

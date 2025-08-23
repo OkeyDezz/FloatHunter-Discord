@@ -270,7 +270,7 @@ class MarketplaceScanner:
                 return False
             
             # Verifica se o namespace /trade está conectado
-            if '/trade' not in self.sio.connected_namespaces:
+            if '/trade' not in self.sio.connection_namespaces:
                 logger.error("❌ Namespace /trade não está conectado")
                 return False
             
@@ -292,11 +292,11 @@ class MarketplaceScanner:
             await asyncio.sleep(2)
             
             # Verifica se o namespace /trade está conectado
-            if '/trade' not in self.sio.connected_namespaces:
+            if '/trade' not in self.sio.connection_namespaces:
                 logger.error("❌ Namespace /trade não está conectado, aguardando...")
                 # Aguarda mais um pouco e tenta novamente
                 await asyncio.sleep(3)
-                if '/trade' not in self.sio.connected_namespaces:
+                if '/trade' not in self.sio.connection_namespaces:
                     logger.error("❌ Namespace /trade ainda não está conectado")
                     return
             

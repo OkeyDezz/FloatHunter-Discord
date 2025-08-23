@@ -179,57 +179,41 @@ class MarketplaceScanner:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
     
-    async def _get_socket_metadata(self) -> bool:
-        """Obtém metadata para autenticação do WebSocket."""
+    async def _get_socket_metadata(self):
+        """Obtém metadata do socket do CSGOEmpire."""
         try:
-            if not self.settings.CSGOEMPIRE_API_KEY:
-                logger.error("❌ API key do CSGOEmpire não configurada")
-                return False
-            
-            # Endpoint conforme documentação oficial
+            logger.info("🔍 Obtendo metadata do socket...")
             url = "https://csgoempire.com/api/v2/metadata/socket"
             headers = {
                 "Authorization": f"Bearer {self.settings.CSGOEMPIRE_API_KEY}",
                 "Accept": "application/json",
-                "User-Agent": "Mozilla/5.0"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache"
             }
-            
-            logger.info(f"🔍 Obtendo metadata de: {url}")
-            logger.info(f"🔍 Headers: {headers}")
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
-                    logger.info(f"📡 Resposta da API: {response.status}")
-                    
-                    if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"📡 Dados recebidos: {data}")
-                        
-                        js_data = data.get('data') or data
-                        
-                        self.user_id = js_data.get('user', {}).get('id')
-                        self.socket_token = js_data.get('socket_token')
-                        self.socket_signature = js_data.get('socket_signature') or js_data.get('token_signature')
-                        self.user_model = js_data.get('user')
-                        
-                        logger.info(f"🔍 Dados extraídos:")
-                        logger.info(f"   - User ID: {self.user_id}")
-                        logger.info(f"   - Socket Token: {self.socket_token[:10] if self.socket_token else 'None'}...")
-                        logger.info(f"   - Socket Signature: {self.socket_signature[:10] if self.socket_signature else 'None'}...")
-                        logger.info(f"   - User Model: {'Presente' if self.user_model else 'Ausente'}")
-                        
-                        if all([self.user_id, self.socket_token, self.socket_signature, self.user_model]):
-                            logger.info("✅ Metadata obtida com sucesso")
-                            return True
-                        else:
-                            logger.error("❌ Dados de autenticação incompletos")
-                            return False
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ Erro ao obter metadata: {response.status}")
-                        logger.error(f"❌ Resposta: {error_text}")
+                    if response.status != 200:
+                        logger.error(f"❌ API retornou {response.status}")
                         return False
-                        
+                    
+                    data = await response.json()
+                    js_data = data.get('data') or data
+                    
+                    self.user_id = js_data.get('user', {}).get('id')
+                    self.socket_token = js_data.get('socket_token')
+                    self.socket_signature = js_data.get('socket_signature') or js_data.get('token_signature')
+                    
+                    if not all([self.user_id, self.socket_token, self.socket_signature]):
+                        logger.error("❌ Metadata incompleta")
+                        return False
+                    
+                    logger.info(f"✅ Metadata obtida: User ID {self.user_id}")
+                    logger.info(f"   Token: {self.socket_token[:30]}...")
+                    logger.info(f"   Signature: {self.socket_signature[:30]}...")
+                    return True
+                    
         except Exception as e:
             logger.error(f"❌ Erro ao obter metadata: {e}")
             import traceback
@@ -286,9 +270,9 @@ class MarketplaceScanner:
     async def _configure_websocket(self):
         """Configura o WebSocket após conexão."""
         try:
-            logger.info("🔧 Configurando WebSocket após conexão...")
+            logger.info("⚙️ Configurando WebSocket...")
             
-            # Aguarda estabilizar e verifica se o namespace está conectado
+            # Aguarda um pouco para garantir que a conexão está estável
             await asyncio.sleep(2)
             
             # Verifica se o namespace /trade está conectado
@@ -302,66 +286,44 @@ class MarketplaceScanner:
             
             logger.info("✅ Namespace /trade está conectado, prosseguindo com configuração...")
             
-            # Emite identify conforme documentação oficial
-            logger.info("🆔 Emitindo identify para autenticação...")
+            # Obtém metadata FRESCA antes de autenticar
+            if not await self._get_socket_metadata():
+                logger.error("❌ Falha ao obter metadata fresca para autenticação")
+                return
+            
+            # Identifica o usuário
             identify_payload = {
                 'uid': self.user_id,
                 'authorizationToken': self.socket_token,
                 'signature': self.socket_signature,
                 'uuid': str(uuid.uuid4())
             }
-            logger.info(f"🆔 Payload identify: {identify_payload}")
             
+            logger.info(f"🆔 Payload identify: {identify_payload}")
             await self.sio.emit('identify', identify_payload, namespace='/trade')
             
             # Aguarda autenticação
-            logger.info("⏳ Aguardando autenticação...")
-            await asyncio.sleep(5)  # Aumentei o tempo de espera
+            await asyncio.sleep(5)
             
-            # Configura APENAS evento new_item
-            logger.info("📤 Configurando APENAS evento new_item...")
-            allowed_events_payload = {
-                'events': ['new_item']
-            }
-            logger.info(f"📤 Payload allowedEvents: {allowed_events_payload}")
-            
-            await self.sio.emit('allowedEvents', allowed_events_payload, namespace='/trade')
-            logger.info("📤 Evento permitido: new_item")
-            
-            # Configura filtros básicos
-            logger.info("📤 Configurando filtros básicos...")
-            
-            # Converte preços para centavos corretamente
-            # CSGOEmpire usa centavos, então multiplicamos por 100
+            # Configura filtros de preço
             price_min_centavos = int(self.settings.MIN_PRICE * 100)
             price_max_centavos = int(self.settings.MAX_PRICE * 100)
-            
             filters_payload = {
                 'price_min': price_min_centavos,
                 'price_max': price_max_centavos
             }
             logger.info(f"📤 Payload filters: {filters_payload}")
             logger.info(f"📤 Preços convertidos: ${self.settings.MIN_PRICE:.2f} - ${self.settings.MAX_PRICE:.2f} → {price_min_centavos} - {price_max_centavos} centavos")
-            
             await self.sio.emit('filters', filters_payload, namespace='/trade')
-            logger.info("📤 Filtros configurados: preço apenas")
             
-            # NÃO marca como autenticado aqui - aguarda confirmação do servidor
-            logger.info("⏳ Aguardando confirmação de autenticação do servidor...")
-            logger.info("⏳ Aguardando evento 'init' com authenticated=true...")
+            # Configura eventos permitidos
+            allowed_events_payload = {
+                'events': ['new_item', 'deleted_item', 'updated_seller_online_status']
+            }
+            logger.info(f"📤 Payload allowed_events: {allowed_events_payload}")
+            await self.sio.emit('allowed_events', allowed_events_payload, namespace='/trade')
             
-            # Log de configuração
-            logger.info("🔍 Configuração do WebSocket concluída:")
-            logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
-            logger.info("   - Evento único: new_item")
-            logger.info("   - Aguardando confirmação de autenticação...")
-            
-            logger.info("🔍 MONITORAMENTO ATIVO:")
-            logger.info("   - WebSocket: ✅ Conectado")
-            logger.info("   - Autenticação: ⏳ Aguardando confirmação")
-            logger.info("   - Evento: ✅ new_item")
-            logger.info("   - Filtros: ✅ Configurados")
-            logger.info("   - Status: 🔄 AGUARDANDO AUTENTICAÇÃO DO SERVIDOR")
+            logger.info("✅ WebSocket configurado com sucesso")
             
         except Exception as e:
             logger.error(f"❌ Erro ao configurar WebSocket: {e}")
@@ -369,15 +331,14 @@ class MarketplaceScanner:
             logger.error(f"Traceback: {traceback.format_exc()}")
     
     async def _reauthenticate(self):
-        """Tenta reautenticar o usuário."""
+        """Tenta reautenticar o usuário com metadata fresca."""
         try:
             logger.info("🔄 Tentando reautenticação...")
             
-            # Obtém nova metadata (pode ter expirado)
+            # Obtém metadata FRESCA para reautenticação
             if await self._get_socket_metadata():
                 logger.info("✅ Nova metadata obtida, tentando identificar...")
                 
-                # Emite identify novamente
                 identify_payload = {
                     'uid': self.user_id,
                     'authorizationToken': self.socket_token,
@@ -385,18 +346,28 @@ class MarketplaceScanner:
                     'uuid': str(uuid.uuid4())
                 }
                 
+                logger.info(f"🔄 Payload identify para reautenticação: {identify_payload}")
                 await self.sio.emit('identify', identify_payload, namespace='/trade')
-                logger.info("🔄 Identify reenviado, aguardando resposta...")
                 
-                # Aguarda um pouco para ver se funciona
+                logger.info("🔄 Identify reenviado, aguardando resposta...")
                 await asyncio.sleep(3)
+                
+                # Verifica se a reautenticação foi bem-sucedida
+                if self.authenticated:
+                    logger.info("✅ Reautenticação bem-sucedida!")
+                    return True
+                else:
+                    logger.warning("⚠️ Reautenticação falhou")
+                    return False
             else:
                 logger.error("❌ Falha ao obter nova metadata para reautenticação")
+                return False
                 
         except Exception as e:
             logger.error(f"❌ Erro durante reautenticação: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
     
     async def _reconnect_websocket(self):
         """Reconecta ao WebSocket após falha de autenticação."""

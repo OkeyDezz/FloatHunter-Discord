@@ -4,19 +4,18 @@ Filtro de lucro para o Opportunity Bot.
 
 import logging
 from typing import Dict, Optional
-from config.settings import Settings
+from utils.supabase_client import SupabaseClient
 
 logger = logging.getLogger(__name__)
 
 class ProfitFilter:
     """Filtro para verificar se um item tem potencial de lucro."""
     
-    def __init__(self, min_profit_percentage: float = None, coin_to_usd_factor: float = None):
-        self.settings = Settings()
-        # Usa os valores das configurações se não forem especificados
-        self.min_profit_percentage = min_profit_percentage or self.settings.MIN_PROFIT_PERCENTAGE
-        self.coin_to_usd_factor = coin_to_usd_factor or self.settings.COIN_TO_USD_FACTOR
-        logger.info(f"🔧 Filtro de lucro configurado com lucro mínimo: {self.min_profit_percentage}%")
+    def __init__(self, min_profit_percentage: float = 5.0, coin_to_usd_factor: float = 0.614):
+        self.min_profit_percentage = min_profit_percentage
+        self.supabase = SupabaseClient()
+        # Fator de conversão de coin para dólar
+        self.coin_to_usd_factor = coin_to_usd_factor
     
     async def check(self, item: Dict) -> bool:
         """Verifica se um item tem potencial de lucro."""
@@ -25,7 +24,7 @@ class ProfitFilter:
             
             if profit_percentage is None:
                 # Se não conseguir calcular lucro, REJEITA o item
-                logger.info(f"❌ Item {item.get('name')} REJEITADO - lucro não pode ser calculado")
+                logger.debug(f"Item {item.get('name')} REJEITADO - lucro não pode ser calculado")
                 return False
             
             result = profit_percentage >= self.min_profit_percentage

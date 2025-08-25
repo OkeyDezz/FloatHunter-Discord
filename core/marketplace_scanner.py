@@ -8,7 +8,7 @@ import socketio
 import aiohttp
 import time
 import uuid
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from datetime import datetime
 
 from config.settings import Settings
@@ -41,6 +41,10 @@ class MarketplaceScanner:
         self.socket_token = None
         self.socket_signature = None
         self.user_model = None
+        
+        # Controle de duplicatas - evita processar o mesmo item múltiplas vezes
+        self.processed_items = set()
+        self.max_processed_items = 1000  # Mantém apenas os últimos 1000 itens processados
         
         # Log das configurações
         logger.info("🔧 Configurações carregadas:")
@@ -90,7 +94,6 @@ class MarketplaceScanner:
                 """Novo item disponível - APENAS este evento."""
                 try:
                     logger.info(f"🆕 NOVO ITEM RECEBIDO: {type(data)}")
-                    logger.info(f"🆕 Dados brutos: {data}")
                     
                     if isinstance(data, list):
                         logger.info(f"📋 Lista com {len(data)} itens")
@@ -103,7 +106,7 @@ class MarketplaceScanner:
                     elif isinstance(data, dict):
                         logger.info(f"📋 Item único recebido")
                         item_name = data.get('market_name', data.get('name', 'Unknown'))
-                        item_id = data.get('id', 'Unknown')
+                        item_id = item.get('id', 'Unknown')
                         logger.info(f"   🆕 {item_name} (ID: {item_id})")
                         await self._process_item(data, 'new_item')
                     
@@ -136,41 +139,38 @@ class MarketplaceScanner:
                     
                     if isinstance(data, dict):
                         auth_status = data.get('authenticated', False)
-                        is_guest = data.get('isGuest', True)
-                        server_info = data.get('server', 'Unknown')
-                        
-                        logger.info(f"📡 Status de autenticação:")
-                        logger.info(f"   - Authenticated: {auth_status}")
-                        logger.info(f"   - Is Guest: {is_guest}")
-                        logger.info(f"   - Server: {server_info}")
-                        
                         if auth_status:
                             logger.info("✅ Autenticação confirmada pelo servidor")
                             self.authenticated = True
                         else:
                             logger.warning("⚠️ Servidor indica que não está autenticado")
-                            if is_guest:
-                                logger.warning("⚠️ Usuário marcado como guest - problema de autenticação")
                             self.authenticated = False
-                            
-                            # Se não estiver autenticado, tenta reautenticar
-                            logger.info("🔄 Tentando reautenticar...")
-                            await asyncio.sleep(2)
-                            await self._reauthenticate()
                     else:
                         logger.info(f"📡 Evento init recebido (tipo: {type(data)})")
                         
                 except Exception as e:
                     logger.error(f"❌ Erro ao processar evento init: {e}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
             
-            # Handler para TODOS os eventos (debug)
-            @self.sio.on('*', namespace='/trade')
-            async def on_any_event(event, data):
-                """Handler para qualquer evento (debug)."""
-                if event not in ['connect', 'disconnect', 'connect_error']:
-                    logger.info(f"📡 EVENTO RECEBIDO: {event} - Dados: {data}")
+            # Handler para eventos de autenticação
+            @self.sio.on('auth', namespace='/trade')
+            async def on_auth(data):
+                """Evento de resposta de autenticação."""
+                try:
+                    logger.info(f"📡 Evento auth recebido: {data}")
+                    
+                    if isinstance(data, dict):
+                        auth_status = data.get('authenticated', False)
+                        if auth_status:
+                            logger.info("✅ Autenticação confirmada pelo comando auth")
+                            self.authenticated = True
+                        else:
+                            logger.warning("⚠️ Comando auth falhou")
+                            self.authenticated = False
+                    else:
+                        logger.info(f"📡 Evento auth recebido (tipo: {type(data)})")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Erro ao processar evento auth: {e}")
             
             logger.info("✅ Handlers de eventos configurados")
             
@@ -179,195 +179,168 @@ class MarketplaceScanner:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
     
-    async def _get_socket_metadata(self):
-        """Obtém metadata do socket do CSGOEmpire."""
+    async def _get_socket_metadata(self) -> bool:
+        """Obtém metadata para autenticação do WebSocket."""
         try:
-            logger.info("🔍 Obtendo metadata do socket...")
+            if not self.settings.CSGOEMPIRE_API_KEY:
+                logger.error("❌ API key do CSGOEmpire não configurada")
+                return False
+            
+            # Endpoint conforme documentação oficial
             url = "https://csgoempire.com/api/v2/metadata/socket"
             headers = {
                 "Authorization": f"Bearer {self.settings.CSGOEMPIRE_API_KEY}",
                 "Accept": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache"
+                "User-Agent": "Mozilla/5.0"
             }
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
-                    if response.status != 200:
-                        logger.error(f"❌ API retornou {response.status}")
+                    if response.status == 200:
+                        data = await response.json()
+                        js_data = data.get('data') or data
+                        
+                        self.user_id = js_data.get('user', {}).get('id')
+                        self.socket_token = js_data.get('socket_token')
+                        self.socket_signature = js_data.get('socket_signature') or js_data.get('token_signature')
+                        self.user_model = js_data.get('user')
+                        
+                        if all([self.user_id, self.socket_token, self.socket_signature, self.user_model]):
+                            logger.info("✅ Metadata obtida com sucesso")
+                            return True
+                        else:
+                            logger.error("❌ Dados de autenticação incompletos")
+                            return False
+                    else:
+                        logger.error(f"❌ Erro ao obter metadata: {response.status}")
                         return False
-                    
-                    data = await response.json()
-                    js_data = data.get('data') or data
-                    
-                    self.user_id = js_data.get('user', {}).get('id')
-                    self.socket_token = js_data.get('socket_token')
-                    self.socket_signature = js_data.get('socket_signature') or js_data.get('token_signature')
-                    
-                    if not all([self.user_id, self.socket_token, self.socket_signature]):
-                        logger.error("❌ Metadata incompleta")
-                        return False
-                    
-                    logger.info(f"✅ Metadata obtida: User ID {self.user_id}")
-                    logger.info(f"   Token: {self.socket_token[:30]}...")
-                    logger.info(f"   Signature: {self.socket_signature[:30]}...")
-                    return True
-                    
+                        
         except Exception as e:
             logger.error(f"❌ Erro ao obter metadata: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def _connect_websocket(self) -> bool:
         """Conecta ao WebSocket do CSGOEmpire."""
         try:
-            if self.sio.connected:
-                logger.info("✅ WebSocket já está conectado")
+            if self.sio.connected and self.authenticated:
+                logger.info("✅ WebSocket já está conectado e autenticado")
+                return True
+            
+            # Se já está conectado mas não autenticado, não reconecta
+            if self.sio.connected and not self.authenticated:
+                logger.info("🔌 WebSocket já conectado, aguardando autenticação...")
                 return True
             
             if not all([self.user_id, self.socket_token, self.socket_signature]):
                 logger.error("❌ Dados de autenticação incompletos")
                 return False
             
-            # Query string conforme documentação oficial
-            qs = f"uid={self.user_id}&token={self.socket_token}"
+            # URL e parâmetros conforme documentação oficial
+            # CSGOEmpire usa EIO=3 e o endpoint correto é wss://trade.csgoempire.com/s/
+            base_url = "wss://trade.csgoempire.com"
             
-            logger.info(f"🔌 Conectando ao WebSocket: trade.csgoempire.com/?{qs}")
+            logger.info(f"🔌 Conectando ao WebSocket CSGOEmpire...")
+            logger.info(f"   - URL base: {base_url}")
+            logger.info(f"   - User ID: {self.user_id}")
+            logger.info(f"   - Token: {self.socket_token[:20]}...")
             
-            # Conecta usando a documentação oficial
+            # Conecta usando a documentação oficial do CSGOEmpire
             await self.sio.connect(
-                f"https://trade.csgoempire.com/?{qs}",
-                socketio_path='s/',
+                base_url,
+                socketio_path='/s/',
                 transports=['websocket'],
+                headers={
+                    'User-Agent': f'{self.user_id} API Bot'
+                },
+                auth={
+                    'uid': self.user_id,
+                    'token': self.socket_token
+                },
                 namespaces=['/trade']
             )
             
             logger.info("🔌 WebSocket conectado ao namespace /trade")
             
             # Aguarda estabilizar
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
             
             if not self.sio.connected:
                 logger.error("❌ WebSocket desconectado após conexão")
                 return False
             
-            # Verifica se o namespace /trade está conectado
-            if '/trade' not in self.sio.connection_namespaces:
-                logger.error("❌ Namespace /trade não está conectado")
-                return False
-            
-            logger.info("✅ WebSocket conectado com sucesso")
+            # NÃO marca como conectado ainda - aguarda autenticação
+            logger.info("🔌 WebSocket conectado, aguardando autenticação...")
             return True
                 
         except Exception as e:
             logger.error(f"❌ Erro ao conectar WebSocket: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def _configure_websocket(self):
         """Configura o WebSocket após conexão."""
         try:
-            logger.info("⚙️ Configurando WebSocket...")
+            logger.info("🔧 Configurando WebSocket após conexão...")
             
-            # Aguarda um pouco para garantir que a conexão está estável
-            await asyncio.sleep(2)
+            # Aguarda estabilizar
+            await asyncio.sleep(1)
             
-            # Verifica se o namespace /trade está conectado
-            if '/trade' not in self.sio.connection_namespaces:
-                logger.error("❌ Namespace /trade não está conectado, aguardando...")
-                # Aguarda mais um pouco e tenta novamente
-                await asyncio.sleep(3)
-                if '/trade' not in self.sio.connection_namespaces:
-                    logger.error("❌ Namespace /trade ainda não está conectado")
-                    return
+            # Emite identify conforme documentação oficial do CSGOEmpire
+            logger.info("🆔 Emitindo identify para autenticação...")
+            logger.info(f"   - User ID: {self.user_id}")
+            logger.info(f"   - Token: {self.socket_token[:20]}...")
+            logger.info(f"   - Signature: {self.socket_signature[:20]}...")
             
-            logger.info("✅ Namespace /trade está conectado, prosseguindo com configuração...")
-            
-            # Obtém metadata FRESCA antes de autenticar
-            if not await self._get_socket_metadata():
-                logger.error("❌ Falha ao obter metadata fresca para autenticação")
-                return
-            
-            # Identifica o usuário
-            identify_payload = {
+            # Formato conforme documentação oficial do CSGOEmpire
+            identify_data = {
                 'uid': self.user_id,
+                'model': self.user_model,
                 'authorizationToken': self.socket_token,
-                'signature': self.socket_signature,
-                'uuid': str(uuid.uuid4())
+                'signature': self.socket_signature
             }
             
-            logger.info(f"🆔 Payload identify: {identify_payload}")
-            await self.sio.emit('identify', identify_payload, namespace='/trade')
+            logger.info("🆔 Enviando comando identify...")
+            await self.sio.emit('identify', identify_data, namespace='/trade')
             
             # Aguarda autenticação
-            await asyncio.sleep(5)
+            logger.info("⏳ Aguardando autenticação...")
+            await asyncio.sleep(3)
             
-            # Configura filtros de preço
-            price_min_centavos = int(self.settings.MIN_PRICE * 100)
-            price_max_centavos = int(self.settings.MAX_PRICE * 100)
-            filters_payload = {
-                'price_min': price_min_centavos,
-                'price_max': price_max_centavos
+            # Configura filtros conforme documentação oficial do CSGOEmpire
+            logger.info("📤 Configurando filtros de preço...")
+            
+            # Converte preços USD para centavos (formato esperado pela API)
+            price_min_centavos = int(self.settings.MIN_PRICE / self.settings.COIN_TO_USD_FACTOR * 100)
+            price_max_centavos = int(self.settings.MAX_PRICE / self.settings.COIN_TO_USD_FACTOR * 100)
+            
+            filters_data = {
+                'price_max': price_max_centavos  # CSGOEmpire usa centavos
             }
-            logger.info(f"📤 Payload filters: {filters_payload}")
-            logger.info(f"📤 Preços convertidos: ${self.settings.MIN_PRICE:.2f} - ${self.settings.MAX_PRICE:.2f} → {price_min_centavos} - {price_max_centavos} centavos")
-            await self.sio.emit('filters', filters_payload, namespace='/trade')
             
-            # Configura eventos permitidos
-            allowed_events_payload = {
-                'events': ['new_item', 'deleted_item', 'updated_seller_online_status']
-            }
-            logger.info(f"📤 Payload allowed_events: {allowed_events_payload}")
-            await self.sio.emit('allowed_events', allowed_events_payload, namespace='/trade')
+            logger.info(f"📤 Filtro de preço: máximo {price_max_centavos} centavos (${self.settings.MAX_PRICE:.2f})")
+            await self.sio.emit('filters', filters_data, namespace='/trade')
+            logger.info("📤 Filtros configurados com sucesso")
             
-            logger.info("✅ WebSocket configurado com sucesso")
+            # NÃO marca como autenticado aqui - aguarda confirmação do servidor
+            logger.info("⏳ Aguardando confirmação de autenticação do servidor...")
+            logger.info("⏳ Aguardando evento 'init' com authenticated=true...")
+            
+            # Log de configuração
+            logger.info("🔍 Configuração do WebSocket concluída:")
+            logger.info("   - Filtros de preço: $%.2f - $%.2f" % (self.settings.MIN_PRICE, self.settings.MAX_PRICE))
+            logger.info("   - Evento único: new_item")
+            logger.info("   - Aguardando confirmação de autenticação...")
+            
+            logger.info("🔍 MONITORAMENTO ATIVO:")
+            logger.info("   - WebSocket: ✅ Conectado")
+            logger.info("   - Autenticação: ⏳ Aguardando confirmação")
+            logger.info("   - Evento: ✅ new_item")
+            logger.info("   - Filtros: ✅ Configurados")
+            logger.info("   - Status: 🔄 AGUARDANDO AUTENTICAÇÃO DO SERVIDOR")
             
         except Exception as e:
             logger.error(f"❌ Erro ao configurar WebSocket: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-    
-    async def _reauthenticate(self):
-        """Tenta reautenticar o usuário com metadata fresca."""
-        try:
-            logger.info("🔄 Tentando reautenticação...")
-            
-            # Obtém metadata FRESCA para reautenticação
-            if await self._get_socket_metadata():
-                logger.info("✅ Nova metadata obtida, tentando identificar...")
-                
-                identify_payload = {
-                    'uid': self.user_id,
-                    'authorizationToken': self.socket_token,
-                    'signature': self.socket_signature,
-                    'uuid': str(uuid.uuid4())
-                }
-                
-                logger.info(f"🔄 Payload identify para reautenticação: {identify_payload}")
-                await self.sio.emit('identify', identify_payload, namespace='/trade')
-                
-                logger.info("🔄 Identify reenviado, aguardando resposta...")
-                await asyncio.sleep(3)
-                
-                # Verifica se a reautenticação foi bem-sucedida
-                if self.authenticated:
-                    logger.info("✅ Reautenticação bem-sucedida!")
-                    return True
-                else:
-                    logger.warning("⚠️ Reautenticação falhou")
-                    return False
-            else:
-                logger.error("❌ Falha ao obter nova metadata para reautenticação")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Erro durante reautenticação: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
     
     async def _reconnect_websocket(self):
         """Reconecta ao WebSocket após falha de autenticação."""
@@ -393,20 +366,65 @@ class MarketplaceScanner:
         except Exception as e:
             logger.error(f"❌ Erro durante reconexão: {e}")
     
+    async def _wait_for_authentication(self, timeout_seconds: int = 30) -> bool:
+        """Aguarda autenticação ser confirmada pelo servidor."""
+        try:
+            logger.info(f"⏳ Aguardando autenticação (timeout: {timeout_seconds}s)...")
+            
+            start_time = time.time()
+            while time.time() - start_time < timeout_seconds:
+                if self.authenticated:
+                    logger.info("✅ Autenticação confirmada pelo servidor!")
+                    return True
+                
+                await asyncio.sleep(1)
+            
+            logger.warning(f"⚠️ Timeout de autenticação ({timeout_seconds}s) - não autenticado")
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao aguardar autenticação: {e}")
+            return False
+    
+    def _is_item_already_processed(self, item_id: str) -> bool:
+        """Verifica se o item já foi processado para evitar duplicatas."""
+        return item_id in self.processed_items
+    
+    def _mark_item_as_processed(self, item_id: str) -> None:
+        """Marca um item como processado e limpa itens antigos se necessário."""
+        self.processed_items.add(item_id)
+        
+        # Limpa itens antigos se exceder o limite
+        if len(self.processed_items) > self.max_processed_items:
+            # Remove os itens mais antigos (mantém apenas os últimos 1000)
+            items_to_remove = len(self.processed_items) - self.max_processed_items
+            items_list = list(self.processed_items)
+            for i in range(items_to_remove):
+                self.processed_items.remove(items_list[i])
+            logger.debug(f"🧹 Limpeza de cache: {items_to_remove} itens antigos removidos")
+    
     async def _process_item(self, item: Dict, event_type: str) -> None:
         """Processa um item recebido."""
         try:
-            logger.info(f"🔍 Processando item: {item.get('market_name', item.get('name', 'Unknown'))}")
+            # Verifica se o item já foi processado
+            item_id = str(item.get('id', ''))
+            if not item_id:
+                logger.warning("⚠️ Item sem ID, ignorando")
+                return
+            
+            if self._is_item_already_processed(item_id):
+                logger.info(f"🔄 Item já processado anteriormente: {item_id} - ignorando duplicata")
+                return
             
             # Filtro básico de preço (ultra-rápido)
             if not self._check_basic_price_filter(item):
-                logger.info(f"🚫 Item {item.get('market_name', 'Unknown')} REJEITADO pelo filtro de preço")
+                self._mark_item_as_processed(item_id)  # Marca como processado mesmo que rejeitado
                 return
             
             # Extrai dados básicos
             extracted_item = self._extract_item_data(item)
             if not extracted_item:
-                logger.warning(f"⚠️ Falha ao extrair dados do item")
+                self._mark_item_as_processed(item_id)
                 return
             
             # Enriquece com dados da database
@@ -416,13 +434,19 @@ class MarketplaceScanner:
             if await self._apply_opportunity_filters(extracted_item):
                 logger.info(f"🎯 OPORTUNIDADE ENCONTRADA: {extracted_item.get('name')}")
                 await self.discord_poster.post_opportunity(extracted_item)
-            else:
-                logger.info(f"❌ Item {extracted_item.get('name')} REJEITADO pelos filtros de oportunidade")
+            
+            # Marca como processado após todo o processamento
+            self._mark_item_as_processed(item_id)
+            logger.info(f"✅ Item processado com sucesso: {item_id} (Total processados: {len(self.processed_items)})")
                 
         except Exception as e:
             logger.error(f"❌ Erro ao processar item: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Marca como processado mesmo em caso de erro para evitar loops infinitos
+            if item_id:
+                self._mark_item_as_processed(item_id)
     
     def _check_basic_price_filter(self, item: Dict) -> bool:
         """Filtro básico de preço (ultra-rápido)."""
@@ -432,8 +456,7 @@ class MarketplaceScanner:
                 return False
             
             # Converte centavos para USD
-            # CSGOEmpire usa centavos diretamente, não precisa do fator de conversão aqui
-            price_usd = purchase_price_centavos / 100
+            price_usd = (purchase_price_centavos / 100) * self.settings.COIN_TO_USD_FACTOR
             
             if price_usd < self.settings.MIN_PRICE:
                 logger.debug(f"🚫 Item {item.get('market_name', 'Unknown')} REJEITADO: ${price_usd:.2f} < ${self.settings.MIN_PRICE:.2f}")
@@ -458,15 +481,13 @@ class MarketplaceScanner:
             purchase_price = data.get('purchase_price')
             
             if not all([item_id, market_name, purchase_price]):
-                logger.warning(f"⚠️ Dados incompletos do item: id={item_id}, market_name={market_name}, purchase_price={purchase_price}")
                 return None
             
             # Parse do nome do item
             base_name, is_stattrak, is_souvenir, condition = self._parse_market_hash_name(market_name)
             
             # Converte preço de centavos para USD
-            # CSGOEmpire usa centavos diretamente, não precisa do fator de conversão
-            price_usd = purchase_price / 100
+            price_usd = (purchase_price / 100) * self.settings.COIN_TO_USD_FACTOR
             
             logger.info(f"💰 Item: {market_name}")
             logger.info(f"   - Base: {base_name}")
@@ -596,12 +617,81 @@ class MarketplaceScanner:
             logger.error(f"❌ Erro ao aplicar filtros: {e}")
             return False
     
+    async def _get_items_via_api(self) -> List[Dict]:
+        """Busca itens via API REST como alternativa ao WebSocket."""
+        try:
+            logger.info("🔍 Buscando itens via API REST...")
+            
+            # Endpoint para buscar itens disponíveis
+            url = "https://csgoempire.com/api/v2/trading/items"
+            headers = {
+                "Authorization": f"Bearer {self.settings.CSGOEMPIRE_API_KEY}",
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0"
+            }
+            
+            params = {
+                "limit": 100,  # Busca até 100 itens
+                "offset": 0
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        items = data.get('data', [])
+                        logger.info(f"✅ API retornou {len(items)} itens")
+                        return items
+                    else:
+                        logger.error(f"❌ Erro na API: {response.status}")
+                        return []
+                        
+        except Exception as e:
+            logger.error(f"❌ Erro ao buscar itens via API: {e}")
+            return []
+    
+    async def _scan_items_via_api(self):
+        """Scanner alternativo usando API REST."""
+        try:
+            logger.info("🔍 Iniciando scanner via API REST...")
+            
+            while True:
+                try:
+                    # Busca itens via API
+                    items = await self._get_items_via_api()
+                    
+                    if items:
+                        logger.info(f"📋 Processando {len(items)} itens...")
+                        
+                        for item in items:
+                            try:
+                                # Processa cada item
+                                await self._process_item(item, 'api_scan')
+                            except Exception as e:
+                                logger.error(f"❌ Erro ao processar item: {e}")
+                                continue
+                    else:
+                        logger.info("📋 Nenhum item encontrado via API")
+                    
+                    # Aguarda antes da próxima busca
+                    logger.info("⏳ Aguardando 30 segundos para próxima busca...")
+                    await asyncio.sleep(30)
+                    
+                except Exception as e:
+                    logger.error(f"❌ Erro no loop de scanner API: {e}")
+                    await asyncio.sleep(30)
+                    
+        except asyncio.CancelledError:
+            logger.info("🛑 Scanner API cancelado")
+        except Exception as e:
+            logger.error(f"❌ Erro fatal no scanner API: {e}")
+    
     async def start(self):
         """Inicia o scanner."""
         try:
             logger.info("🚀 Iniciando scanner de marketplace...")
             
-            # Obtém metadata
+            # Obtém metadata para WebSocket
             if not await self._get_socket_metadata():
                 logger.error("❌ Falha ao obter metadata")
                 return False
@@ -616,7 +706,15 @@ class MarketplaceScanner:
                 logger.error("❌ Falha ao conectar ao WebSocket")
                 return False
             
-            logger.info("✅ Scanner iniciado com sucesso!")
+            # Configura o WebSocket após conexão
+            await self._configure_websocket()
+            
+            # Aguarda autenticação ser confirmada pelo servidor
+            if not await self._wait_for_authentication(timeout_seconds=30):
+                logger.warning("⚠️ Autenticação não confirmada pelo servidor")
+                return False
+            
+            logger.info("✅ Scanner iniciado e autenticado com sucesso!")
             return True
                 
         except Exception as e:
@@ -645,25 +743,25 @@ class MarketplaceScanner:
                 try:
                     # Tenta conectar
                     if await self.start():
-                        logger.info("✅ Scanner conectado, aguardando oportunidades...")
+                        logger.info("✅ Scanner conectado e autenticado, aguardando oportunidades...")
                         
-                        # Loop de monitoramento
+                        # Loop de monitoramento do WebSocket
                         while True:
                             if not self.sio.connected:
                                 logger.warning("⚠️ WebSocket desconectado, tentando reconectar...")
                                 break
                             
                             if not self.authenticated:
-                                logger.warning("⚠️ Não autenticado, tentando reautenticar...")
-                                await self._reauthenticate()
-                                
-                                # Se ainda não estiver autenticado após algumas tentativas, reconecta
-                                if not self.authenticated:
+                                logger.warning("⚠️ WebSocket conectado mas não autenticado, tentando reautenticar...")
+                                # Tenta reautenticar sem desconectar
+                                await self._configure_websocket()
+                                if await self._wait_for_authentication(timeout_seconds=15):
+                                    logger.info("✅ Reautenticação bem-sucedida!")
+                                    continue
+                                else:
                                     logger.warning("⚠️ Reautenticação falhou, reconectando...")
                                     break
                             
-                            # Log de status a cada 30 segundos
-                            logger.info(f"🔍 Status: WebSocket={self.sio.connected}, Auth={self.authenticated}, Aguardando eventos...")
                             await asyncio.sleep(30)
                         
                         # Aguarda antes de reconectar

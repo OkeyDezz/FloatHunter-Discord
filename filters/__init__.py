@@ -1,0 +1,1 @@
+# Filtros do Opportunity Bot

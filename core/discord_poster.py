@@ -175,14 +175,15 @@ class DiscordPoster:
             else:
                 liquidity_emoji = "❓"
             
-            # URL do item
-            item_url = f"https://csgoempire.com/shop?id={item_id}"
+            # URL do item - formato correto para o CSGOEmpire
+            # O CSGOEmpire usa o formato: https://csgoempire.com/item/{item_id}
+            item_url = f"https://csgoempire.com/item/{item_id}"
             
             # Título do embed
             title = f"🎯 Oportunidade Encontrada!"
             
             # Descrição
-            description = f"**{name}**\n[🔗 Ver no CSGOEmpire]({item_url})"
+            description = f"**{name}**\n[🔗 Ver no CSGOEmpire]({item_url}) (ID: {item_id})"
             
             # Campos do embed
             fields = []
